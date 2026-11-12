@@ -13,7 +13,8 @@ from loguru import logger as log
 from spatialdata import SpatialData
 from spatialdata.models import TableModel
 
-from harpy._storage._anndata import _MissingAnnDataElement, _read_anndata_element
+from harpy._storage._anndata import _matrix_format, _MissingAnnDataElement, _read_anndata_element
+from harpy.experimental._moments import MomentAggregator
 from harpy.image._image import _get_translation, _precondition, get_dataarray
 from harpy.table._metadata import _FEATURE_MATRIX_SCHEMA_VERSION
 from harpy.table._regionprops import _calculate_regionprop_features
@@ -21,9 +22,8 @@ from harpy.table._validation import _RESERVED_OBSM_KEYS
 from harpy.table.io._add_table import add_table
 from harpy.table.io._components import _check_in_memory_versus_storage_axes, _component_update_destination
 from harpy.table.io._components_by_region import add_table_components_by_region
-from harpy.table.io._write_by_region import _matrix_format
 from harpy.table.io._write_validation import _validated_observation_pairs
-from harpy.utils._aggregate import RasterAggregator, _get_mask_area
+from harpy.utils._aggregate import get_instance_size
 from harpy.utils._keys import _CELL_INDEX, _FEATURE_MATRICES_KEY, _INSTANCE_KEY, _REGION_KEY
 from harpy.utils.utils import _da_unique, _make_list
 
@@ -70,7 +70,6 @@ def add_feature_matrix(
     instance_key: str = _INSTANCE_KEY,
     feature_matrices_key: str = _FEATURE_MATRICES_KEY,
     chunks: str | int | tuple[int, ...] | None = None,
-    run_on_gpu: bool = False,
 ) -> SpatialData:
     """
     Compute per-instance feature matrices from labels and optional image data.
@@ -163,9 +162,6 @@ def add_feature_matrix(
         Optional chunk specification used to rechunk image and labels arrays
         during feature extraction. Rechunking on disk ahead of time is often
         more efficient.
-    run_on_gpu
-        Whether to use GPU-backed execution where supported. If GPU execution is
-        requested but CuPy is not available, Harpy falls back to CPU execution.
 
     Returns
     -------
@@ -349,7 +345,6 @@ def add_feature_matrix(
             instance_key=instance_key,
             region_key=region_key,
             chunks=chunks,
-            run_on_gpu=run_on_gpu,
         )
         pair_frames.append(pair_frame)
         if pair_channels is not None:
@@ -679,7 +674,6 @@ def _compute_pair_feature_frame(
     instance_key: str,
     region_key: str,
     chunks: str | int | tuple[int, ...] | None,
-    run_on_gpu: bool,
 ) -> tuple[pd.DataFrame, list[str], list[str] | None]:
     labels = get_dataarray(sdata, element_name=pair.labels_name)
     _ = _get_translation(labels, to_coordinate_system=pair.coordinate_system)
@@ -705,8 +699,7 @@ def _compute_pair_feature_frame(
         labels_array = labels.data
 
     mask_for_instances = labels_array if labels_array.ndim == 3 else labels_array[None, ...]
-    # Keep shared instance ids on CPU; downstream intensity/area helpers move them
-    # to the appropriate backend internally when needed.
+    # instance ids shared by the intensity and morphology features
     instance_ids = np.asarray(_da_unique(mask_for_instances, run_on_gpu=False))
     instance_ids = instance_ids[instance_ids != 0].astype(int, copy=False)
 
@@ -718,12 +711,11 @@ def _compute_pair_feature_frame(
             channel_names=channel_names,
             instance_key=instance_key,
             instance_ids=instance_ids,
-            run_on_gpu=run_on_gpu,
         )
         feature_frames.append(intensity_frame)
 
     if morphology_features:
-        # 2D intensity extraction adds a singleton z-axis for RasterAggregator.
+        # 2D intensity extraction adds a singleton z-axis for the aggregator.
         # Remove it again before calling skimage regionprops so 2D-only features
         # such as eccentricity still work.
         morphology_labels_array = (
@@ -734,7 +726,6 @@ def _compute_pair_feature_frame(
             morphology_features=morphology_features,
             instance_key=instance_key,
             instance_ids=instance_ids,
-            run_on_gpu=run_on_gpu,
         )
         feature_frames.append(morphology_frame)
         ordered_columns.extend(morphology_features)
@@ -834,15 +825,17 @@ def _prepare_raster_arrays(
     if labels_chunks is not None:
         prepared_labels = prepared_labels.rechunk(labels_chunks)
 
-    # RasterAggregator requires the labels and the image to share spatial (z, y, x) chunks.
+    # MomentAggregator requires the labels and the image to share spatial (z, y, x) chunks.
     # The labels and image already share spatial shape (validated by _precondition), so align
-    # the (cheaper) single-band labels onto the image's spatial chunking when they differ.
-    if prepared_labels.chunksize != prepared_image.chunksize[1:]:
+    # the (cheaper) single-band labels onto the image's spatial chunks when they differ.
+    # Compare the chunks, not the chunk sizes: a crop off the chunk grid has the same chunk
+    # size with other chunk boundaries.
+    if prepared_labels.chunks != prepared_image.chunks[1:]:
         log.info(
-            "Image and labels have different chunk sizes; rechunking labels to match "
+            "Image and labels have different chunks; rechunking labels to match "
             f"the image's spatial chunks {prepared_image.chunksize[1:]} for aggregation."
         )
-        prepared_labels = prepared_labels.rechunk(prepared_image.chunksize[1:])
+        prepared_labels = prepared_labels.rechunk(prepared_image.chunks[1:])
 
     return prepared_image, prepared_labels
 
@@ -854,44 +847,19 @@ def _compute_intensity_feature_frame(
     channel_names: Sequence[str],
     instance_key: str,
     instance_ids: np.ndarray,
-    run_on_gpu: bool,
 ) -> pd.DataFrame:
-    result = pd.DataFrame({instance_key: instance_ids})
-
-    aggregator = RasterAggregator(
+    aggregator = MomentAggregator(
         mask_dask_array=labels_array,
         image_dask_array=image_array,
         instance_key=instance_key,
-        run_on_gpu=run_on_gpu,
     )
+    # all intensity features in one pass over the image
+    stats_frames = aggregator.aggregate_stats(stats_funcs=tuple(intensity_features), index=instance_ids)
 
-    aggregated_features = [feature for feature in intensity_features if feature not in {"max", "min"}]
-    renamed_frames: dict[str, pd.DataFrame] = {}
-    if aggregated_features:
-        stats_funcs = tuple(aggregated_features)
-        stats_frames = aggregator.aggregate_stats(stats_funcs=stats_funcs, index=instance_ids)
-        for feature, frame in zip(stats_funcs, stats_frames, strict=True):
-            renamed_frames[feature] = _rename_intensity_columns(frame, feature, channel_names, instance_key)
-
-    if "max" in intensity_features:
-        frame = aggregator.aggregate_max(index=instance_ids)
-        renamed_frames["max"] = _rename_intensity_columns(
-            frame,
-            "max",
-            channel_names,
-            instance_key,
-        )
-    if "min" in intensity_features:
-        frame = aggregator.aggregate_min(index=instance_ids)
-        renamed_frames["min"] = _rename_intensity_columns(
-            frame,
-            "min",
-            channel_names,
-            instance_key,
-        )
-
-    for feature in intensity_features:
-        result = result.merge(renamed_frames[feature], how="outer", on=instance_key)
+    result = pd.DataFrame({instance_key: instance_ids})
+    for feature, frame in zip(intensity_features, stats_frames, strict=True):
+        renamed = _rename_intensity_columns(frame, feature, channel_names, instance_key)
+        result = result.merge(renamed, how="outer", on=instance_key)
 
     # sanity checks
     assert result[instance_key].is_unique, (
@@ -926,7 +894,6 @@ def _compute_morphology_feature_frame(
     morphology_features: Sequence[str],
     instance_key: str,
     instance_ids: np.ndarray,
-    run_on_gpu: bool,
 ) -> pd.DataFrame:
     if labels_array.ndim == 3:
         unsupported = [feature for feature in morphology_features if feature in _UNSUPPORTED_3D_MORPHOLOGY_FEATURES]
@@ -937,13 +904,9 @@ def _compute_morphology_feature_frame(
 
     if "area" in morphology_features:
         mask_for_area = labels_array if labels_array.ndim == 3 else labels_array[None, ...]
-        # Only the area fast path honors run_on_gpu; skimage regionprops remains CPU-only.
-        area_frame = _get_mask_area(
-            mask_for_area,
-            index=instance_ids,
-            instance_key=instance_key,
-            instance_size_key="area",
-            run_on_gpu=run_on_gpu,
+        # the area is the pixel count of each instance
+        area_frame = get_instance_size(
+            mask_for_area, index=instance_ids, instance_key=instance_key, instance_size_key="area"
         )
         area_frame[instance_key] = area_frame[instance_key].astype(int, copy=False)
         result_frames.append(area_frame.loc[:, [instance_key, "area"]])

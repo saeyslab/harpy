@@ -22,7 +22,7 @@ def test_validate_table_accepts_a_registered_generic_feature_matrix(backed_class
     adata.obsm["derived_features"] = np.ones((adata.n_obs, 2), dtype=np.float64)
     adata.uns["feature_matrices"] = {
         "derived_features": {
-            "schema_version": 1,
+            "schema_version": 2,
             "source_kind": "test_features",
             "backend": "numpy",
             "dtype": "float64",
@@ -47,7 +47,7 @@ def test_validate_table_checks_only_the_selected_feature_matrix_registry(backed_
     # One name for two columns: an invalid record, registered under a custom key.
     adata.uns["custom_feature_matrices"] = {
         "derived_features": {
-            "schema_version": 1,
+            "schema_version": 2,
             "source_kind": "test_features",
             "feature_columns": ["first"],
         }
@@ -179,10 +179,27 @@ def test_validate_table_rejects_a_feature_matrix_under_a_reserved_key(matrix_nam
     table = sdata.tables["table"]
     table.obsm[matrix_name] = np.ones((table.n_obs, 1))
     table.uns["feature_matrices"] = {
-        matrix_name: {"schema_version": 1, "source_kind": "test_features", "feature_columns": ["first"]}
+        matrix_name: {"schema_version": 2, "source_kind": "test_features", "feature_columns": ["first"]}
     }
 
     with pytest.raises(ValueError, match="reserved .obsm key"):
+        validate_table(sdata, "table")
+
+
+def test_validate_table_rejects_feature_metadata_of_schema_version_1() -> None:
+    """Metadata as Harpy 0.5 wrote it raises, and the error says to compute the matrix again."""
+    sdata = _labels_table_sdata()
+    table = sdata.tables["table"]
+    table.obsm["features"] = np.ones((table.n_obs, 1))
+    table.uns["feature_matrices"] = {
+        "features": {"schema_version": 1, "source_kind": "harpy_add_feature_matrix", "feature_columns": ["area"]}
+    }
+
+    with pytest.raises(
+        ValueError,
+        match=r"schema_version must equal 2, found 1\. Compute the matrix again with the function that wrote it, "
+        r"named by its source_kind 'harpy_add_feature_matrix'",
+    ):
         validate_table(sdata, "table")
 
 

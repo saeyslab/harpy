@@ -1,10 +1,12 @@
 import numpy as np
 import pandas as pd
 import pytest
+from scipy import ndimage
 from skimage.measure import regionprops_table
 from spatialdata import read_zarr
 
 from harpy.table._add_feature_matrix import add_feature_matrix
+from harpy.utils._keys import _INSTANCE_KEY
 
 
 def test_add_feature_matrix_creates_new_table(sdata_multi_c_no_backed):
@@ -106,6 +108,62 @@ def test_add_feature_matrix_rechunks_labels_when_chunks_differ(sdata_multi_c_no_
     assert np.allclose(matrix, reference)
 
 
+def test_add_feature_matrix_rechunks_labels_with_other_chunk_boundaries(sdata_multi_c_no_backed):
+    def intensity_stats(output_table_name):
+        sdata = add_feature_matrix(
+            sdata_multi_c_no_backed,
+            labels_name="masks_whole",
+            image_name="raw_image",
+            table_name=None,
+            output_table_name=output_table_name,
+            feature_key="intensity_stats",
+            features=["mean", "var"],
+            channels=[0],
+            overwrite_output_table=True,
+        )
+        return sdata.tables[output_table_name].obsm["intensity_stats"]
+
+    reference = intensity_stats("table_reference")
+
+    # Same chunk size, other chunk boundaries, as a crop that does not start on the chunk grid gives.
+    shifted = (100, 256, 156)
+    sdata_multi_c_no_backed["raw_image"] = sdata_multi_c_no_backed["raw_image"].chunk({"y": shifted, "x": shifted})
+    sdata_multi_c_no_backed["masks_whole"] = sdata_multi_c_no_backed["masks_whole"].chunk({"y": 256, "x": 256})
+
+    np.testing.assert_allclose(intensity_stats("table_shifted_chunks"), reference, rtol=1e-6)
+
+
+def test_add_feature_matrix_intensity_features_follow_feature_and_channel_order(sdata_multi_c_no_backed):
+    # The values of the statistics are tested in test_moments.py; this checks where add_feature_matrix puts
+    # them: which channels, which columns of .obsm, and which rows. Channels out of order catch a sorted order.
+    features = ["max", "mean"]
+    channels = [4, 0]
+    sdata_multi_c_no_backed = add_feature_matrix(
+        sdata_multi_c_no_backed,
+        labels_name="masks_whole",
+        image_name="raw_image",
+        table_name=None,
+        output_table_name="table_features",
+        feature_key="intensity",
+        features=features,
+        channels=channels,
+        overwrite_output_table=True,
+    )
+    adata = sdata_multi_c_no_backed.tables["table_features"]
+    feature_columns = adata.uns["feature_matrices"]["intensity"]["feature_columns"]
+    assert feature_columns == ["max__4", "max__0", "mean__4", "mean__0"]
+
+    image = sdata_multi_c_no_backed["raw_image"].data.compute()
+    mask = sdata_multi_c_no_backed["masks_whole"].data.compute()
+    labels = adata.obs[_INSTANCE_KEY].to_numpy()
+    reference = {"max": ndimage.maximum, "mean": ndimage.mean}
+    expected = np.column_stack(
+        [reference[feature](image[channel], labels=mask, index=labels) for feature in features for channel in channels]
+    )
+
+    np.testing.assert_allclose(np.asarray(adata.obsm["intensity"]), expected, rtol=1e-6)
+
+
 def test_add_feature_matrix_stores_all_source_channels_when_channels_is_none(sdata_multi_c_no_backed):
     sdata_multi_c_no_backed = add_feature_matrix(
         sdata_multi_c_no_backed,
@@ -157,6 +215,35 @@ def test_add_feature_matrix_supports_2d_eccentricity_with_intensity_features(sda
     assert feature_columns == ["mean__0", "eccentricity"]
     eccentricity_index = feature_columns.index("eccentricity")
     assert np.allclose(adata.obsm["mixed_features"][:, eccentricity_index], expected)
+
+
+@pytest.mark.parametrize(
+    ("image_name", "features"),
+    [(None, ["area"]), ("raw_image", ["mean", "area"])],
+)
+def test_add_feature_matrix_area_matches_regionprops(sdata_multi_c_no_backed, image_name, features):
+    sdata_multi_c_no_backed = add_feature_matrix(
+        sdata_multi_c_no_backed,
+        labels_name="masks_whole",
+        image_name=image_name,
+        table_name=None,
+        output_table_name="table_area",
+        feature_key="area_features",
+        features=features,
+        channels=[0],
+        overwrite_output_table=True,
+    )
+
+    adata = sdata_multi_c_no_backed.tables["table_area"]
+    feature_columns = adata.uns["feature_matrices"]["area_features"]["feature_columns"]
+    expected = pd.DataFrame(
+        regionprops_table(
+            label_image=sdata_multi_c_no_backed["masks_whole"].data.compute(), properties=["label", "area"]
+        )
+    )
+    expected = expected.set_index("label").loc[adata.obs[_INSTANCE_KEY], "area"].to_numpy()
+
+    np.testing.assert_array_equal(adata.obsm["area_features"][:, feature_columns.index("area")], expected)
 
 
 def test_add_feature_matrix_supports_custom_metadata_key(sdata_multi_c_no_backed):
