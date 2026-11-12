@@ -531,7 +531,9 @@ Changes:
   Move with it `_block_length`, which it calls, and `_matrix_format`, which
   gives the format it takes. The regional writer, `add_feature_matrix`, the
   component writer and `concat` import them from `_storage`.
-- Tests: the existing tests, unchanged.
+- Tests: the existing tests. One test helper of the regional writer imports
+  `_decode_anndata_element` from `_storage`, as the regional writer no
+  longer imports it.
 
 ### Step 6: follow-up, metadata names in `_metadata.py`, no change in behaviour
 
