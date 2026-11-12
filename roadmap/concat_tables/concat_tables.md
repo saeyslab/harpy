@@ -500,48 +500,25 @@ Changes:
 - `docs/api.md`: `tb.concat` under Table, "Processing and analysis", next to
   `tb.validate_table`.
 - `docs/development/metadata.md`, "Keeping records consistent":
-  `hp.tb.concat` merges the table records, which `anndata.concat` and
-  `spatialdata.concatenate` drop.
-- The `hp.tb.concat` docstring: each input's declared regions must equal its
-  observed ones, as SpatialData requires. Subsetting rows does not update the
-  annotation: AnnData drops the unused categories of `obs[region_key]`, but
-  `uns["spatialdata_attrs"]["region"]` keeps every region, and `concat` and
-  `validate_table` raise "declares regions without observations". This holds
-  on both sides of `concat`.
-
-  Before concatenating, a table subset to fewer regions, by per-cell QC for
-  example, needs its annotation updated:
-
-  ```python
-  subset = adata[adata.obs["region"] == "cells_a"].copy()
-  subset.uns["spatialdata_attrs"]["region"] = ["cells_a"]
-  ```
-
-  After concatenating, a subset of the result to one or a few regions needs
-  the same. `add_table` rebuilds the annotation from its `region` argument, so
-  pass the subset's regions, not the old list:
-
-  ```python
-  subset = adata[adata.obs["region"].isin(["cells_a", "cells_b"])].copy()
-  sdata = hp.tb.io.add_table(
-      sdata,
-      subset,
-      output_table_name="subset",
-      region=list(subset.obs["region"].cat.categories),
-  )
-  ```
-
-  The canonical, point-aggregation and `add_feature_matrix` records of the
-  subset keep the entries of the removed regions: validation ignores them, and
-  a later `concat` drops them. `docs/canonical_centers.md` shows the same step
-  for canonical centers.
-
-- The `hp.tb.concat` docstring: the palettes of categorical `obs` columns are
-  merged by category name, not by `uns_merge`; a palette with a category
-  without a color is dropped, and scanpy then assigns its default colors.
-- The `hp.tb.concat` docstring: `uns_merge` keeps the other `uns` records as
-  they are, also those of per-table analyses, such as PCA, neighbors, UMAP or
-  a clustering: recompute these after concatenating.
+  `anndata.concat` and `spatialdata.concatenate` drop Harpy's records, or keep
+  one table's; `hp.tb.concat` merges them.
+- `docs/development/metadata.md`, "The table annotation": the declared
+  regions equal the regions that have rows, in both directions; when
+  SpatialData and Harpy check this; how a subset or `anndata.concat` breaks
+  it, and the fix. The `region` parameter of `hp.tb.io.add_table` says that
+  it replaces the declared regions and must equal the regions with rows.
+- The `hp.tb.concat` docstring, Notes:
+  - to remove whole regions, subset the rows and set the declared regions,
+    or pass them as `region` to `hp.tb.io.add_table`; removing cells within
+    a region needs no such step;
+  - what a subset keeps in `uns` for the regions it removed is left out,
+    with a log message;
+  - the palettes of categorical `obs` columns are merged by category name,
+    not by `uns_merge`; a palette with a category without a color is
+    dropped, and scanpy then assigns its default colors;
+  - `uns_merge` keeps the other `uns` entries as they are, also those of
+    per-table analyses, such as PCA, neighbors, UMAP or a clustering:
+    recompute these after concatenating.
 
 ### Step 5: follow-up, lazy-matrix helpers in `_storage`, no change in behaviour
 

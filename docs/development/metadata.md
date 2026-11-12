@@ -188,7 +188,8 @@ directions; unused categories of the column do not count.
   `sdata.tables[name] = adata`, so a table can hold a mismatch in memory until
   it is validated or written.
 - Harpy checks it in {func}`hp.tb.validate_table <harpy.tb.validate_table>`
-  and `hp.tb.concat`, with one message for each direction. `validate_table`
+  and {func}`hp.tb.concat <harpy.tb.concat>`, with one message for each
+  direction. `validate_table`
   also requires each declared region to be an element of `sdata`; SpatialData
   only warns.
 - {func}`hp.tb.io.add_table <harpy.tb.io.add_table>` replaces the declared
@@ -233,7 +234,8 @@ the class matrices of
 points as `adata.X`, so their sources are in `point_aggregation`, once for
 all of them.
 
-`hp.tb.concat` relies on this rule: the fields other than `regions` must be
+{func}`hp.tb.concat <harpy.tb.concat>` relies on this rule: the fields other
+than `regions` must be
 equal in every table, and each table contributes the entries of the regions
 it declares.
 
@@ -248,6 +250,10 @@ it declares.
   corresponding matrix and source labels.
 - Schema versions describe metadata contracts. Reader versions describe software
   provenance; they are not schema versions.
+- Concatenating tables with `anndata.concat` or `spatialdata.concatenate`
+  drops these records, or keeps one table's; use
+  {func}`hp.tb.concat <harpy.tb.concat>`, which merges them by the rule in
+  [Metadata per region](#metadata-per-region).
 
 For staging, overwrites and recovery responsibilities, see
 [Storage writes and overwrite guarantees](storage.md).

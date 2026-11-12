@@ -281,6 +281,7 @@ the contract.
     tb.add_regionprops
     tb.add_feature_matrix
     tb.validate_table
+    tb.concat
     tb.extract_instances
     tb.ZarrIterableInstances
     tb.ZarrDataLoader
