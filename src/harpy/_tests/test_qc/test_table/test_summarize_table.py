@@ -57,7 +57,7 @@ def _table(*, csr=sparse.csr_matrix, x=True):
     )
     # The .obsm matrices register their column names, as aggregate_points writes them.
     adata.uns["feature_matrices"] = {
-        key: {"schema_version": 1, "source_kind": "test", "feature_columns": list(_FEATURE_NAMES[key])}
+        key: {"schema_version": 2, "source_kind": "test", "feature_columns": list(_FEATURE_NAMES[key])}
         for key in _OBSM_KEYS
     }
     # Only the table, outside any SpatialData object: summarize_table needs neither the annotated labels nor

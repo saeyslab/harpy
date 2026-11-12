@@ -42,6 +42,16 @@ So stable functions depend on an experimental class, and their tests pin its
 behaviour. Moving `MomentAggregator` out of `experimental`, and deprecating
 `RasterAggregator`, is a later decision.
 
+### One method: `aggregate_stats`
+
+`MomentAggregator` gets no per-statistic methods such as `aggregate_mean` or
+`aggregate_area`. Each of them would make a full pass over the image, so
+calling them one after another would bring back the cost of
+`RasterAggregator`. Every Harpy caller passes the statistics it needs to one
+`aggregate_stats` call, and a mask-only caller uses
+`aggregate_stats("center_of_mass", index=...)[0]`. Thin wrappers can be added
+if `MomentAggregator` becomes public.
+
 ### GPU: no `run_on_gpu` for aggregation
 
 `MomentAggregator` runs on CPU only, with numba kernels. Whether the GPU path
