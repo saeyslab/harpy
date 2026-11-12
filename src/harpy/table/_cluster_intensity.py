@@ -72,8 +72,7 @@ def cluster_intensity(
 
     See Also
     --------
-    harpy.tb.aggregate_image : calculates total intensity per instance per channel.
-    harpy.tb.preprocess_proteomics: calculates instance size and normalizes intensity by instance size.
+    harpy.tb.aggregate_image : calculates the mean intensity per instance and channel, with ``mode="mean"``.
     harpy.pl.cluster_intensity_heatmap: plot heatmap of mean intensity per cluster.
     """
     if cluster_key_uns is None:
