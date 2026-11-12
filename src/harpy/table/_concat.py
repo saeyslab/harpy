@@ -1,8 +1,8 @@
-"""Concatenate Harpy tables along their rows, keeping Harpy's records valid."""
+"""Concatenate Harpy tables along their rows, keeping Harpy's metadata valid."""
 
 from __future__ import annotations
 
-from collections.abc import Callable, Collection, Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Literal
@@ -18,62 +18,60 @@ from loguru import logger as log
 from spatialdata.models import TableModel
 
 from harpy._storage._anndata import _decode_anndata_element
-from harpy.table._add_feature_matrix import _SOURCE_KIND as _ADD_FEATURE_MATRIX_SOURCE_KIND
-from harpy.table._add_feature_matrix import _concat_feature_matrix_metadata, _without_sources
-from harpy.table._metadata import _POINT_AGGREGATION_KEY
-from harpy.table._utils import _comparable_metadata
+from harpy.table._metadata import (
+    _POINT_AGGREGATION_KEY,
+    _comparable_metadata,
+    _merged_metadata,
+    _metadata_difference,
+)
 from harpy.table._validation import _validate_feature_matrices, _validate_table_annotation_without_sdata
 from harpy.table.canonical_centers._models import CanonicalMetadata
 from harpy.table.canonical_centers._schema import (
     CANONICAL_OBSM_KEY,
     SPATIAL_COORDINATES_KEY,
-    _build_canonical_metadata,
-    _canonical_metadata_to_storage,
     _validate_canonical_centers_without_sources,
 )
 from harpy.table.io._write_by_region import _matrix_format
 from harpy.utils._keys import _FEATURE_MATRICES_KEY
 
 _UNS_MERGE_STRATEGIES = (None, "same", "unique", "first", "only")
-# Fields of the point-aggregation record that must be equal in every table.
-_POINT_AGGREGATION_HEADER = ("schema_version", "source_kind", "feature_key", "feature_class_key")
 _FORMAT_NAMES = {"dense": "dense", "csr": "CSR", "csc": "CSC", "DataFrame": "a DataFrame", None: "absent"}
 _CONVERSIONS = {"dense": ".toarray()", "csr": ".tocsr()", "csc": ".tocsc()"}
 _CANONICAL_MATRIX = f"obsm[{CANONICAL_OBSM_KEY!r}]"
-_CANONICAL_RECORD = f"uns[{SPATIAL_COORDINATES_KEY!r}][{CANONICAL_OBSM_KEY!r}]"
-_MISSING = object()
+_CANONICAL_METADATA = f"uns[{SPATIAL_COORDINATES_KEY!r}][{CANONICAL_OBSM_KEY!r}]"
 
 
 @dataclass(frozen=True)
 class _Table:
-    """A table to concatenate, with the annotation and records its checks return."""
+    """A table to concatenate, with the annotation and metadata its checks return."""
 
     name: str  # how errors name the table: tables['s1'] or tables[0]
     adata: AnnData
     region_key: str
     instance_key: str
     regions: tuple[str, ...]
-    registry: Mapping[str, Mapping]
-    canonical: CanonicalMetadata | None
+    feature_matrices_metadata: Mapping[str, Mapping]  # keyed by obsm key
+    canonical_metadata: CanonicalMetadata | None
 
 
 def concat(
     tables: Sequence[AnnData] | Mapping[str, AnnData],
     *,
-    label: str | None = None,
+    table_key: str | None = None,
     uns_merge: Literal["same", "unique", "first", "only"] | None = None,
     feature_matrices_key: str = _FEATURE_MATRICES_KEY,
     drop_mismatched_feature_matrices: bool = False,
 ) -> AnnData:
-    """Concatenate Harpy tables along their rows, keeping Harpy's records valid.
+    """Concatenate Harpy tables along their rows, keeping Harpy's metadata valid.
 
     Use it to combine the tables of several samples into one, for example after
     per-sample quality control. :func:`anndata.concat` drops ``uns`` by
     default, and :func:`spatialdata.concatenate` rebuilds only the SpatialData
-    annotation. ``concat`` also merges the records that Harpy keeps in ``uns``:
-    the feature-matrix registry, the canonical centers, the record of
-    :func:`harpy.tb.aggregate_points` and the colors of categorical ``obs``
-    columns.
+    annotation. ``concat`` also merges Harpy's metadata in ``uns``: of the
+    feature matrices, ``uns["feature_matrices"]``; of the canonical centers,
+    ``uns["spatial_coordinates"]["spatial_canonical"]``; and of
+    :func:`harpy.tb.aggregate_points`, ``uns["point_aggregation"]``. It also
+    merges the colors of categorical ``obs`` columns.
 
     The tables must have the same structure. Otherwise ``concat`` raises, and
     the error says what differs and how to fix it:
@@ -90,10 +88,14 @@ def concat(
       and is lazy in every table or in memory in every table. Backed matrices
       count as lazy: ``concat`` turns them into Dask arrays without reading
       them. It loads no matrix into memory and changes no format;
-    - a registered feature matrix is registered in every table, with equal
-      records (see ``drop_mismatched_feature_matrices``); canonical centers and
-      the record of :func:`harpy.tb.aggregate_points` are in every table or in
-      none.
+    - a feature matrix described in ``uns[feature_matrices_key]`` is
+      described in every table, with the same metadata (see
+      ``drop_mismatched_feature_matrices``);
+    - canonical centers, added with :func:`harpy.tb.add_canonical_centers`,
+      are in every table or in none;
+    - the point-aggregation metadata is in every table or in none. If
+      present, the tables were aggregated the same way: same points column,
+      same mode (ordinary or class-aware).
 
     ``concat`` drops ``obsp``, ``varp``, ``varm`` and ``raw``, and the ``var``
     columns that differ between tables, with a warning: they describe one
@@ -102,12 +104,17 @@ def concat(
     Parameters
     ----------
     tables
-        The tables, in order. Errors name a table by its key in a mapping, or
-        by its position in a sequence: ``tables['s1']``, ``tables[0]``.
-    label
-        Name of a new ``obs`` column holding each row's table: its key in a
-        mapping, or its position as a string (``"0"``, ``"1"``, ...) in a
-        sequence. It must not be an ``obs`` column of a table.
+        The tables to concatenate, in order: a list, or a mapping from a name
+        to each table. The names, or the positions in a list, identify the
+        tables in error messages, such as ``tables['table_a']`` or
+        ``tables[0]``, and in the ``table_key`` column. To use the names of the
+        tables in ``sdata``, pass
+        ``{name: sdata.tables[name] for name in ["table_a", "table_b"]}``.
+    table_key
+        Name of a new ``obs`` column that records the table each row came
+        from: its name in ``tables`` if that is a mapping, or its position as
+        a string if it is a list: ``"0"``, ``"1"``, ... No column is added by
+        default. It must not be an ``obs`` column of any table.
     uns_merge
         How :func:`anndata.concat` merges the ``uns`` entries that ``concat``
         does not merge itself. ``None``, the default as in AnnData, drops them;
@@ -118,14 +125,14 @@ def concat(
         Nested entries are merged key by key. Dropped top-level entries are
         logged.
     feature_matrices_key
-        Key in ``uns`` of the feature-matrix registry, as in
+        Key in ``uns`` of the feature-matrix metadata, as in
         :func:`harpy.tb.validate_table`.
     drop_mismatched_feature_matrices
-        By default, a registered feature matrix that is missing from a table,
-        or whose records differ between tables, raises. With ``True``, such
-        matrices and their records are dropped instead, with a log message.
-        Records are compared whole, except the sources of each region in the
-        records of :func:`harpy.tb.add_feature_matrix`, which are merged.
+        By default, a feature matrix that is missing from a table, or whose
+        metadata differs between tables, raises. With ``True``, such matrices
+        and their metadata are dropped instead, with a log message. The
+        metadata is compared whole, except its ``regions``, the metadata of
+        each region, which are merged.
 
     Returns
     -------
@@ -142,19 +149,34 @@ def concat(
 
     Notes
     -----
-    Each table's declared regions, ``uns["spatialdata_attrs"]["region"]``,
-    must equal the regions in its rows, as SpatialData requires. Subsetting
-    rows does not update them, so a table subset to fewer regions, before or
-    after concatenating, needs its regions set again::
+    To remove whole regions from a table, for example a failed field of view
+    before concatenating or one sample from the result, subset its rows and
+    set its declared regions, ``uns["spatialdata_attrs"]["region"]``, to the
+    regions that are left. Subsetting does not update them, and ``concat``
+    and validation raise while they list a region without rows::
 
         subset = adata[adata.obs["region"] == "cells_a"].copy()
         subset.uns["spatialdata_attrs"]["region"] = ["cells_a"]
 
-    :func:`harpy.tb.io.add_table` sets them from its ``region`` argument, so
-    pass it the subset's regions, such as
-    ``list(subset.obs["region"].cat.categories)``. The subset's other records
-    keep the entries of the removed regions: validation ignores them, and
-    ``concat`` drops them.
+    or, when storing the subset, pass them to :func:`harpy.tb.io.add_table`
+    instead::
+
+        hp.tb.io.add_table(
+            sdata,
+            subset,
+            output_table_name="table_a",
+            region=["cells_a"],
+            region_key="region",
+            instance_key="cell_ID",
+        )
+
+    Removing cells within a region, such as per-cell quality control, needs
+    no such step.
+
+    A subset keeps the metadata in ``uns`` of the regions it removed, for
+    example their entries in ``uns["point_aggregation"]["regions"]``.
+    ``concat`` takes from each table only the metadata of its declared
+    regions, and logs what it leaves out.
 
     The colors of a categorical ``obs`` column, ``uns[f"{column}_colors"]``,
     are merged by category name, not by ``uns_merge``. A category with
@@ -162,17 +184,18 @@ def concat(
     category has no color in any table, the colors are dropped, and scanpy
     assigns its default colors.
 
-    ``obs`` columns, ``obsm`` matrices and ``uns`` records computed per table,
-    such as a ``leiden`` clustering, ``X_pca``, ``X_umap`` or the records of
-    scanpy's neighbors, are kept, but their values do not compare across
-    tables: recompute them after concatenating.
+    ``obs`` columns and ``obsm`` matrices computed per table, such as a
+    ``leiden`` clustering, ``X_pca`` or ``X_umap``, are kept, and so are
+    ``uns`` entries such as ``uns["neighbors"]`` if ``uns_merge`` keeps them.
+    Their values do not compare across tables: recompute them after
+    concatenating.
 
     Examples
     --------
     .. code-block:: python
 
         tables = {sample: sdata.tables[f"table_{sample}"] for sample in samples}
-        adata = hp.tb.concat(tables, label="sample", uns_merge="unique")
+        adata = hp.tb.concat(tables, table_key="sample", uns_merge="unique")
         sdata = hp.tb.io.add_table(
             sdata,
             adata,
@@ -181,7 +204,7 @@ def concat(
         )
         hp.tb.validate_table(sdata, "table")
     """
-    _check_parameters(label=label, uns_merge=uns_merge, feature_matrices_key=feature_matrices_key)
+    _check_parameters(table_key=table_key, uns_merge=uns_merge, feature_matrices_key=feature_matrices_key)
     keys, adatas = _normalize_tables(tables)
     parsed = [
         _parse_table(f"tables[{key!r}]", adata, feature_matrices_key=feature_matrices_key)
@@ -191,27 +214,32 @@ def concat(
     _check_annotation_keys(parsed)
     _check_regions(parsed)
     _check_obs_names(parsed)
-    _check_obs(parsed, label=label)
+    _check_obs(parsed, table_key=table_key)
     _check_var_names(parsed)
     region_order = [region for table in parsed for region in table.regions]
-    canonical = _merged_canonical_record(parsed, region_order=region_order)
-    point_aggregation = _merged_point_aggregation(parsed, region_order=region_order)
-    mismatched = _mismatched_feature_matrices(parsed)
-    if mismatched and not drop_mismatched_feature_matrices:
+    canonical_metadata = _merged_canonical_metadata(parsed, region_order=region_order)
+    point_aggregation_metadata = _merged_point_aggregation_metadata(parsed, region_order=region_order)
+    mismatched_feature_matrices = _feature_matrices_with_mismatched_metadata(parsed)
+    if mismatched_feature_matrices and not drop_mismatched_feature_matrices:
         raise ValueError(
-            f"A registered feature matrix must be registered in every table, with equal records: "
-            f"{_describe(mismatched)}. Compute these matrices the same way for every table, or pass "
-            "drop_mismatched_feature_matrices=True to drop them and their records."
+            f"A feature matrix described in uns[{feature_matrices_key!r}] must be described in every table, with "
+            f"the same metadata: {_describe(mismatched_feature_matrices)}. Compute these matrices the same way for "
+            "every table, or pass drop_mismatched_feature_matrices=True to drop them and their metadata."
         )
-    _check_components(parsed, dropped_obsm=mismatched)
-    registry = _merged_registry(parsed, dropped=mismatched, region_order=region_order)
+    _check_components(parsed, dropped_feature_matrices=mismatched_feature_matrices)
+    feature_matrices_metadata = _merged_feature_matrices_metadata(
+        parsed, dropped_feature_matrices=mismatched_feature_matrices, region_order=region_order
+    )
 
-    if mismatched:
+    if mismatched_feature_matrices:
         log.info(
-            f"concat drops the feature matrices {list(mismatched)} and their records, as "
-            f"drop_mismatched_feature_matrices=True: {_describe(mismatched)}."
+            f"concat drops the feature matrices {list(mismatched_feature_matrices)} and their metadata, as "
+            f"drop_mismatched_feature_matrices=True: {_describe(mismatched_feature_matrices)}."
         )
     _log_dropped_entries(parsed)
+    _log_left_out_regions(
+        parsed, feature_matrices_key=feature_matrices_key, dropped_feature_matrices=mismatched_feature_matrices
+    )
     palette_columns = [
         column
         for column in parsed[0].adata.obs.columns
@@ -223,13 +251,16 @@ def concat(
         _POINT_AGGREGATION_KEY,
         *(f"{column}_colors" for column in palette_columns),
     }
-    prepared = [_prepared_table(table, owned_uns_keys=owned_uns_keys, dropped_obsm=mismatched) for table in parsed]
+    prepared = [
+        _prepared_table(table, owned_uns_keys=owned_uns_keys, dropped_feature_matrices=mismatched_feature_matrices)
+        for table in parsed
+    ]
     result = ad.concat(
         dict(zip(keys, prepared, strict=True)) if isinstance(tables, Mapping) else prepared,
         join="inner",
         merge="same",
         uns_merge=uns_merge,
-        label=label,
+        label=table_key,
     )
     _log_dropped_var_columns(parsed, result)
     _log_dropped_uns_entries(prepared, result, uns_merge=uns_merge)
@@ -239,23 +270,23 @@ def concat(
         TableModel.REGION_KEY_KEY: parsed[0].region_key,
         TableModel.INSTANCE_KEY: parsed[0].instance_key,
     }
-    if registry:
-        result.uns[feature_matrices_key] = registry
-    if point_aggregation is not None:
-        result.uns[_POINT_AGGREGATION_KEY] = point_aggregation
-    if canonical is not None:
+    if feature_matrices_metadata:
+        result.uns[feature_matrices_key] = feature_matrices_metadata
+    if point_aggregation_metadata is not None:
+        result.uns[_POINT_AGGREGATION_KEY] = point_aggregation_metadata
+    if canonical_metadata is not None:
         coordinates = result.uns.get(SPATIAL_COORDINATES_KEY)
         coordinates = dict(coordinates) if isinstance(coordinates, Mapping) else {}
-        result.uns[SPATIAL_COORDINATES_KEY] = {**coordinates, CANONICAL_OBSM_KEY: canonical}
+        result.uns[SPATIAL_COORDINATES_KEY] = {**coordinates, CANONICAL_OBSM_KEY: canonical_metadata}
     for column in palette_columns:
         _merge_palette(result, parsed, column=column)
     TableModel.validate(result)
     return result
 
 
-def _check_parameters(*, label: object, uns_merge: object, feature_matrices_key: object) -> None:
-    if label is not None and (not isinstance(label, str) or not label):
-        raise ValueError(f"label must be None or a non-empty string, found {label!r}.")
+def _check_parameters(*, table_key: object, uns_merge: object, feature_matrices_key: object) -> None:
+    if table_key is not None and (not isinstance(table_key, str) or not table_key):
+        raise ValueError(f"table_key must be None or a non-empty string, found {table_key!r}.")
     if uns_merge not in _UNS_MERGE_STRATEGIES:
         raise ValueError(f"uns_merge must be None, 'same', 'unique', 'first' or 'only', found {uns_merge!r}.")
     if not isinstance(feature_matrices_key, str) or not feature_matrices_key:
@@ -290,41 +321,32 @@ def _parse_table(name: str, adata: AnnData, *, feature_matrices_key: str) -> _Ta
     if annotation is None:
         raise ValueError(
             f"{name} has no SpatialData annotation, uns[{TableModel.ATTRS_KEY!r}], which concat needs to merge "
-            "the records of each region. Annotate it before concatenating, for example with "
+            "the metadata of each region. Annotate it before concatenating, for example with "
             "spatialdata.models.TableModel.parse(adata, region=..., region_key=..., instance_key=...)."
         )
     region_key, instance_key, regions = annotation
-    registry = _in_table(name, _validate_feature_matrices, adata, feature_matrices_key=feature_matrices_key)
-    has_matrix = CANONICAL_OBSM_KEY in adata.obsm
-    coordinates = adata.uns.get(SPATIAL_COORDINATES_KEY)
-    has_record = isinstance(coordinates, Mapping) and CANONICAL_OBSM_KEY in coordinates
-    if has_matrix != has_record:
-        present, absent = (
-            (_CANONICAL_MATRIX, _CANONICAL_RECORD) if has_matrix else (_CANONICAL_RECORD, _CANONICAL_MATRIX)
-        )
-        raise ValueError(
-            f"{name} has {present} but not {absent}; canonical centers need both. Rebuild them with "
-            f"hp.tb.add_canonical_centers(sdata, table_name=..., overwrite=True), or delete {present}, before "
-            "concatenating."
-        )
-    canonical = _in_table(name, _validate_canonical_centers_without_sources, adata)
+    # These checks are shared with validate_table and do not know the table: name it in their errors.
+    try:
+        feature_matrices_metadata = _validate_feature_matrices(adata, feature_matrices_key=feature_matrices_key)
+        canonical_metadata = _validate_canonical_centers_without_sources(adata)
+    except ValueError as error:
+        raise ValueError(f"{name}: {error}") from error
+    for matrix, metadata in feature_matrices_metadata.items():
+        if "regions" in metadata and not isinstance(metadata["regions"], Mapping):
+            raise ValueError(
+                f"{name}: uns[{feature_matrices_key!r}][{matrix!r}]['regions'] is a "
+                f"{type(metadata['regions']).__name__}, not a mapping. Harpy keeps the metadata of each region there, "
+                "keyed by labels element name; rename the field before concatenating."
+            )
     return _Table(
         name=name,
         adata=adata,
         region_key=region_key,
         instance_key=instance_key,
         regions=regions,
-        registry=registry,
-        canonical=canonical,
+        feature_matrices_metadata=feature_matrices_metadata,
+        canonical_metadata=canonical_metadata,
     )
-
-
-def _in_table(name: str, check: Callable, *args, **kwargs):
-    """Run a check of one table, naming the table in its errors."""
-    try:
-        return check(*args, **kwargs)
-    except ValueError as error:
-        raise ValueError(f"{name}: {error}") from error
 
 
 def _check_annotation_keys(tables: Sequence[_Table]) -> None:
@@ -348,7 +370,7 @@ def _check_regions(tables: Sequence[_Table]) -> None:
     if shared:
         details = "; ".join(f"{region!r} in {', '.join(names)}" for region, names in shared.items())
         raise ValueError(
-            f"Each region must be in one table only, as each table holds its own records of its regions: {details}. "
+            f"Each region must be in one table only, as each table holds its own metadata of its regions: {details}. "
             "Check that no table is passed twice, or keep the rows of each region in one table and update the "
             f"others' uns[{TableModel.ATTRS_KEY!r}]['region'], before concatenating."
         )
@@ -368,7 +390,7 @@ def _check_obs_names(tables: Sequence[_Table]) -> None:
     )
 
 
-def _check_obs(tables: Sequence[_Table], *, label: str | None) -> None:
+def _check_obs(tables: Sequence[_Table], *, table_key: str | None) -> None:
     _require_same_keys(
         "obs columns",
         [table.adata.obs.columns for table in tables],
@@ -385,12 +407,12 @@ def _check_obs(tables: Sequence[_Table], *, label: str | None) -> None:
                 f"concatenating, for example with {example} = {example}.astype({target!r}). Categorical columns "
                 "may differ in their categories."
             )
-    if label is not None:
-        holders = [table.name for table in tables if label in table.adata.obs.columns]
+    if table_key is not None:
+        holders = [table.name for table in tables if table_key in table.adata.obs.columns]
         if holders:
             raise ValueError(
-                f"label {label!r} is an obs column of {', '.join(holders)}, which anndata.concat would overwrite. "
-                "Pass another label, or rename the column."
+                f"table_key {table_key!r} is an obs column of {', '.join(holders)}, which anndata.concat would "
+                "overwrite. Pass another table_key, or rename the column."
             )
 
 
@@ -415,116 +437,102 @@ def _check_var_names(tables: Sequence[_Table]) -> None:
         raise ValueError(
             f"var_names differ: {' and '.join(details)}. concat requires the same features in every table, in the "
             "same order: an outer join would invent zero counts for features a table did not measure. "
-            "hp.tb.aggregate_points keeps only the features found in a table's points, unless it aggregates "
-            "with a feature panel (class-aware mode); aggregate with one, or subset the tables to their shared "
-            "features, for example with adata[:, shared].copy(), before concatenating."
+            "hp.tb.aggregate_points in ordinary mode keeps only the features observed in the points it aggregates, "
+            "so tables of different samples can differ; in class-aware mode it keeps every feature of the feature "
+            "panel, observed or not. Aggregate in class-aware mode, after registering a panel with "
+            "hp.pt.add_feature_panel if the points have none, or subset the tables to their shared features, for "
+            "example with adata[:, shared].copy(), before concatenating."
         )
 
 
-def _merged_canonical_record(tables: Sequence[_Table], *, region_order: Sequence[str]) -> dict | None:
-    """Return the canonical-center record of the result, from the entries of each table's declared regions."""
-    holders = [table.name for table in tables if table.canonical is not None]
+def _merged_canonical_metadata(tables: Sequence[_Table], *, region_order: Sequence[str]) -> dict | None:
+    """Return the canonical-center metadata of the result, from the entries of each table's declared regions."""
+    holders = [table.name for table in tables if table.canonical_metadata is not None]
     if not holders:
         return None
     if len(holders) != len(tables):
-        lacking = [table.name for table in tables if table.canonical is None]
+        lacking = [table.name for table in tables if table.canonical_metadata is None]
         raise ValueError(
             f"Canonical centers are in {', '.join(holders)} but not in {', '.join(lacking)}; every table or none "
             "must have them. Add them to every table with hp.tb.add_canonical_centers(sdata, table_name=...), or "
-            f"delete {_CANONICAL_MATRIX} and {_CANONICAL_RECORD} from every table, before concatenating."
+            f"delete {_CANONICAL_MATRIX} and {_CANONICAL_METADATA} from every table, before concatenating."
         )
-    regions = {}
-    for table in tables:
-        regions.update(table.canonical.regions)
-    metadata = _build_canonical_metadata(regions={region: regions[region] for region in region_order})
-    return _canonical_metadata_to_storage(metadata)
+    # No _metadata_difference check: _parse_table validated each table's canonical metadata, which allows
+    # one value only for every field outside regions (schema_version 2, axes ["z", "y", "x"]).
+    return _merged_metadata(
+        [table.adata.uns[SPATIAL_COORDINATES_KEY][CANONICAL_OBSM_KEY] for table in tables],
+        declared_regions=[table.regions for table in tables],
+        region_order=region_order,
+    )
 
 
-def _merged_point_aggregation(tables: Sequence[_Table], *, region_order: Sequence[str]) -> dict | None:
-    """Return the point-aggregation record of the result, from the entries of each table's declared regions."""
+def _merged_point_aggregation_metadata(tables: Sequence[_Table], *, region_order: Sequence[str]) -> dict | None:
+    """Return the point-aggregation metadata of the result, from the entries of each table's declared regions."""
     key = f"uns[{_POINT_AGGREGATION_KEY!r}]"
-    records = [table.adata.uns.get(_POINT_AGGREGATION_KEY) for table in tables]
-    holders = [table.name for table, record in zip(tables, records, strict=True) if record is not None]
+    per_table = [table.adata.uns.get(_POINT_AGGREGATION_KEY) for table in tables]
+    holders = [table.name for table, metadata in zip(tables, per_table, strict=True) if metadata is not None]
     if not holders:
         return None
     if len(holders) != len(tables):
-        lacking = [table.name for table, record in zip(tables, records, strict=True) if record is None]
+        lacking = [table.name for table, metadata in zip(tables, per_table, strict=True) if metadata is None]
         raise ValueError(
             f"{key} is in {', '.join(holders)} but not in {', '.join(lacking)}; every table or none must have it. "
-            "Concatenate tables of hp.tb.aggregate_points with each other, or delete the record from every "
-            f"table, for example with del adata.uns[{_POINT_AGGREGATION_KEY!r}], before concatenating."
+            "Concatenate tables of hp.tb.aggregate_points with each other, or delete it from every table, for "
+            f"example with del adata.uns[{_POINT_AGGREGATION_KEY!r}], before concatenating."
         )
-    for table, record in zip(tables, records, strict=True):
-        if not isinstance(record, Mapping) or not isinstance(record.get("regions"), Mapping):
+    for table, metadata in zip(tables, per_table, strict=True):
+        if not isinstance(metadata, Mapping) or not isinstance(metadata.get("regions"), Mapping):
             raise ValueError(
                 f"{key} of {table.name} must be a mapping with a 'regions' mapping, as hp.tb.aggregate_points "
-                "writes it. Aggregate the table again, or delete the record from every table, before concatenating."
+                f"writes it. Aggregate the table again, or delete {key} from every table, before concatenating."
             )
-    headers = [
-        _comparable_metadata({field: record[field] for field in _POINT_AGGREGATION_HEADER if field in record})
-        for record in records
-    ]
-    for table, header in zip(tables[1:], headers[1:], strict=True):
-        if header != headers[0]:
-            fields = _differing_fields(headers[0], header)
-            raise ValueError(
-                f"{key} differs in {fields!r} between {tables[0].name} and {table.name}: "
-                f"{ {field: headers[0].get(field) for field in fields} } and "
-                f"{ {field: header.get(field) for field in fields} }. Tables aggregated in ordinary and class-aware "
-                "mode, or from different points columns, do not concatenate; aggregate every table the same way "
-                "with hp.tb.aggregate_points."
-            )
-    regions = {}
-    for table, record in zip(tables, records, strict=True):
-        regions.update({region: record["regions"][region] for region in table.regions if region in record["regions"]})
-    merged = deepcopy(dict(records[0]))
-    merged["regions"] = {region: deepcopy(regions[region]) for region in region_order if region in regions}
-    return merged
+    difference = _metadata_difference(per_table)
+    if difference is not None:
+        position, fields = difference
+        first, other = _comparable_metadata(per_table[0]), _comparable_metadata(per_table[position])
+        raise ValueError(
+            f"{key} differs in {fields!r} between {tables[0].name} and {tables[position].name}: "
+            f"{ {field: first.get(field) for field in fields} } and "
+            f"{ {field: other.get(field) for field in fields} }. Tables aggregated in ordinary and class-aware "
+            "mode, or from different points columns, do not concatenate; aggregate every table the same way "
+            "with hp.tb.aggregate_points."
+        )
+    return _merged_metadata(per_table, declared_regions=[table.regions for table in tables], region_order=region_order)
 
 
-def _mismatched_feature_matrices(tables: Sequence[_Table]) -> dict[str, str]:
-    """Return the registered feature matrices that are missing from a table or whose records differ, with why."""
+def _feature_matrices_with_mismatched_metadata(tables: Sequence[_Table]) -> dict[str, str]:
+    """Return the described feature matrices whose metadata is missing from a table or differs between tables, with why."""
     reasons = {}
-    for matrix in dict.fromkeys(matrix for table in tables for matrix in table.registry):
-        lacking = [table.name for table in tables if matrix not in table.registry]
+    for matrix in dict.fromkeys(matrix for table in tables for matrix in table.feature_matrices_metadata):
+        lacking = [table.name for table in tables if matrix not in table.feature_matrices_metadata]
         if lacking:
-            reasons[matrix] = f"is not registered in {', '.join(lacking)}"
+            reasons[matrix] = f"has no metadata in {', '.join(lacking)}"
             continue
-        first = _record_identity(tables[0].registry[matrix])
-        for table in tables[1:]:
-            identity = _record_identity(table.registry[matrix])
-            if identity != first:
-                fields = _differing_fields(first, identity)
-                reasons[matrix] = f"has records that differ in {fields!r} between {tables[0].name} and {table.name}"
-                break
+        difference = _metadata_difference([table.feature_matrices_metadata[matrix] for table in tables])
+        if difference is not None:
+            position, fields = difference
+            reasons[matrix] = (
+                f"has metadata that differs in {fields!r} between {tables[0].name} and {tables[position].name}"
+            )
     return reasons
 
 
-def _record_identity(record: Mapping) -> dict:
-    """Return the fields of a feature-matrix record that must be equal in every table, comparable as Python values."""
-    if record.get("source_kind") == _ADD_FEATURE_MATRIX_SOURCE_KIND:
-        record = _without_sources(record)
-    return _comparable_metadata(record)
+def _merged_feature_matrices_metadata(
+    tables: Sequence[_Table], *, dropped_feature_matrices: Collection[str], region_order: Sequence[str]
+) -> dict:
+    """Return the feature-matrix metadata of the result, without that of the dropped feature matrices."""
+    return {
+        matrix: _merged_metadata(
+            [table.feature_matrices_metadata[matrix] for table in tables],
+            declared_regions=[table.regions for table in tables],
+            region_order=region_order,
+        )
+        for matrix in tables[0].feature_matrices_metadata
+        if matrix not in dropped_feature_matrices
+    }
 
 
-def _merged_registry(tables: Sequence[_Table], *, dropped: Collection[str], region_order: Sequence[str]) -> dict:
-    """Return the feature-matrix registry of the result, without the dropped matrices."""
-    registry = {}
-    for matrix, record in tables[0].registry.items():
-        if matrix in dropped:
-            continue
-        if record.get("source_kind") == _ADD_FEATURE_MATRIX_SOURCE_KIND:
-            registry[matrix] = _concat_feature_matrix_metadata(
-                [table.registry[matrix] for table in tables],
-                declared_regions=[table.regions for table in tables],
-                region_order=region_order,
-            )
-        else:
-            registry[matrix] = deepcopy(dict(record))
-    return registry
-
-
-def _check_components(tables: Sequence[_Table], *, dropped_obsm: Collection[str]) -> None:
+def _check_components(tables: Sequence[_Table], *, dropped_feature_matrices: Collection[str]) -> None:
     """Check the layers and ``obsm`` keys, and that each matrix has one format and one laziness in every table."""
     layer_keys = [[key for key in table.adata.layers.keys() if key is not None] for table in tables]
     _require_same_keys(
@@ -533,7 +541,7 @@ def _check_components(tables: Sequence[_Table], *, dropped_obsm: Collection[str]
         tables,
         fix="Add or delete these layers so that every table has the same ones before concatenating.",
     )
-    obsm_keys = [[key for key in table.adata.obsm.keys() if key not in dropped_obsm] for table in tables]
+    obsm_keys = [[key for key in table.adata.obsm.keys() if key not in dropped_feature_matrices] for table in tables]
     _require_same_keys(
         "obsm keys",
         obsm_keys,
@@ -625,8 +633,10 @@ def _lazy_if_backed(value: object) -> object:
     return value
 
 
-def _prepared_table(table: _Table, *, owned_uns_keys: Collection[str], dropped_obsm: Collection[str]) -> AnnData:
-    """Return the table for anndata.concat: no records that concat merges itself, no dropped entries.
+def _prepared_table(
+    table: _Table, *, owned_uns_keys: Collection[str], dropped_feature_matrices: Collection[str]
+) -> AnnData:
+    """Return the table for anndata.concat: no metadata that concat merges itself, no dropped entries.
 
     Matrices are not copied, and backed ones are read lazily. ``obsp``, ``varp``,
     ``varm`` and ``raw`` are left out.
@@ -646,7 +656,7 @@ def _prepared_table(table: _Table, *, owned_uns_keys: Collection[str], dropped_o
         var=adata.var.copy(),
         uns=uns,
         layers={key: _lazy_if_backed(value) for key, value in adata.layers.items()},
-        obsm={key: _lazy_if_backed(value) for key, value in adata.obsm.items() if key not in dropped_obsm},
+        obsm={key: _lazy_if_backed(value) for key, value in adata.obsm.items() if key not in dropped_feature_matrices},
     )
 
 
@@ -712,6 +722,33 @@ def _log_dropped_entries(tables: Sequence[_Table]) -> None:
         )
 
 
+def _log_left_out_regions(
+    tables: Sequence[_Table], *, feature_matrices_key: str, dropped_feature_matrices: Collection[str]
+) -> None:
+    """Log the entries that a table's metadata holds for regions it does not declare, which concat leaves out."""
+    for table in tables:
+        by_path: dict[str, Mapping] = {}
+        if table.canonical_metadata is not None:
+            by_path[_CANONICAL_METADATA] = table.adata.uns[SPATIAL_COORDINATES_KEY][CANONICAL_OBSM_KEY]
+        point_aggregation_metadata = table.adata.uns.get(_POINT_AGGREGATION_KEY)
+        if point_aggregation_metadata is not None:
+            by_path[f"uns[{_POINT_AGGREGATION_KEY!r}]"] = point_aggregation_metadata
+        for matrix, metadata in table.feature_matrices_metadata.items():
+            if matrix not in dropped_feature_matrices:
+                by_path[f"uns[{feature_matrices_key!r}][{matrix!r}]"] = metadata
+        left_out = {
+            path: [region for region in metadata.get("regions", {}) if region not in table.regions]
+            for path, metadata in by_path.items()
+        }
+        left_out = {path: regions for path, regions in left_out.items() if regions}
+        if left_out:
+            regions = list(dict.fromkeys(region for path_regions in left_out.values() for region in path_regions))
+            log.info(
+                f"concat leaves out the entries of the regions {regions!r} in {', '.join(left_out)} of {table.name}: "
+                "the table does not declare these regions, for example because a subset removed them."
+            )
+
+
 def _log_dropped_var_columns(tables: Sequence[_Table], result: AnnData) -> None:
     columns = dict.fromkeys(column for table in tables for column in table.adata.var.columns)
     dropped = [column for column in columns if column not in result.var.columns]
@@ -728,7 +765,7 @@ def _log_dropped_uns_entries(prepared: Sequence[AnnData], result: AnnData, *, un
     if dropped:
         log.warning(
             f"concat drops the uns entries {dropped!r}, which uns_merge={uns_merge!r} does not keep. concat merges "
-            "Harpy's records itself and passes the other entries to anndata.concat; pass uns_merge='unique', "
+            "Harpy's metadata itself and passes the other entries to anndata.concat; pass uns_merge='unique', "
             "'same' or 'first' to keep them."
         )
 
@@ -761,12 +798,6 @@ def _describe_groups(groups: Mapping[object, Sequence[str]], *, names: Mapping[o
 
 def _describe(reasons: Mapping[str, str]) -> str:
     return "; ".join(f"{name!r} {reason}" for name, reason in reasons.items())
-
-
-def _differing_fields(first: Mapping, other: Mapping) -> list[str]:
-    return [
-        field for field in dict.fromkeys([*first, *other]) if first.get(field, _MISSING) != other.get(field, _MISSING)
-    ]
 
 
 def _dtype_name(dtype: object) -> str:
