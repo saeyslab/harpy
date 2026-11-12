@@ -66,7 +66,9 @@ adata.uns
 │   └── <matrix key>
 │       ├── schema_version, source_kind
 │       ├── feature_columns             ordered names for matrix columns
-│       └── ...                         writer-specific source metadata
+│       ├── regions                     add_feature_matrix: labels name → image
+│       │                               (or None) + coordinate system
+│       └── ...                         writer-specific metadata of the matrix
 ├── point_aggregation                   sources of a table from aggregate_points; names no class
 │   ├── schema_version, source_kind
 │   ├── feature_key                     points column of the features
@@ -84,6 +86,61 @@ point_aggregation                   → provenance of adata.X and, class-aware, 
 spatial_coordinates["spatial_canonical"]
                                    → adata.obsm["spatial_canonical"]
 ```
+
+For example, a table of
+{func}`hp.tb.aggregate_points <harpy.tb.aggregate_points>` in class-aware
+mode with two regions, and one matrix of
+{func}`hp.tb.add_feature_matrix <harpy.tb.add_feature_matrix>`:
+
+```python
+adata.uns = {
+    # SpatialData's annotation, not Harpy's: which regions the table annotates.
+    "spatialdata_attrs": {"region": ["cells_a", "cells_b"], "region_key": "fov_labels", "instance_key": "cell_ID"},
+    # hp.tb.aggregate_points: where X and the class matrices came from.
+    "point_aggregation": {
+        "schema_version": 1,
+        "source_kind": "harpy_aggregate_points",
+        "feature_key": "gene",
+        "feature_class_key": "code_class",  # class-aware mode only
+        "regions": {
+            "cells_a": {"points_element": "transcripts_a", "coordinate_system": "sample_a"},
+            "cells_b": {"points_element": "transcripts_b", "coordinate_system": "sample_b"},
+        },
+    },
+    # One entry per described obsm matrix, under the matrix's obsm key.
+    "feature_matrices": {
+        # A class matrix of aggregate_points: no regions, its sources are in point_aggregation.
+        "negative": {
+            "schema_version": 2,
+            "source_kind": "harpy_aggregate_points",
+            "feature_columns": ["Negative01", "Negative02"],
+        },
+        # hp.tb.add_feature_matrix
+        "cell_features": {
+            "schema_version": 2,
+            "source_kind": "harpy_add_feature_matrix",
+            "feature_columns": ["mean__DAPI", "mean__CD3", "area"],
+            "source_channels": ["DAPI", "CD3"],  # None without intensity features
+            "features": ["mean", "area"],
+            "regions": {  # image_element is None for morphology only
+                "cells_a": {"image_element": "image_a", "coordinate_system": "sample_a"},
+                "cells_b": {"image_element": "image_b", "coordinate_system": "sample_b"},
+            },
+        },
+    },
+    # hp.tb.add_canonical_centers, or hp.tb.aggregate_points.
+    "spatial_coordinates": {
+        "spatial_canonical": {
+            "schema_version": 2,
+            "axes": ["z", "y", "x"],
+            "regions": {"cells_a": {...}, "cells_b": {...}},
+        },
+    },
+}
+```
+
+[Canonical-center interoperability](../canonical_centers.md) describes the
+entries of `spatial_canonical`.
 
 Each `feature_matrices` record describes the `.obsm` matrix with the same
 key; the shared key is their only link. `feature_matrices` is the default
@@ -118,6 +175,67 @@ coordinates**, stored in `(z, y, x)` order, with `z = 0` for 2D. Different regio
 need not share a coordinate frame. Source dimensions distinguish 2D from 3D;
 these centers are not coordinates in a shared global system. See
 [Canonical-center interoperability](../canonical_centers.md).
+
+## The table annotation
+
+`uns["spatialdata_attrs"]["region"]` declares the regions a table annotates.
+It must equal the regions that have rows in `obs[region_key]`, in both
+directions; unused categories of the column do not count.
+
+- SpatialData checks this with `TableModel.validate`: in `TableModel.parse`,
+  in `SpatialData(tables=...)`, when `sdata.tables = {...}` is set, and when a
+  table is written. Not when rows are subset or with
+  `sdata.tables[name] = adata`, so a table can hold a mismatch in memory until
+  it is validated or written.
+- Harpy checks it in {func}`hp.tb.validate_table <harpy.tb.validate_table>`
+  and `hp.tb.concat`, with one message for each direction. `validate_table`
+  also requires each declared region to be an element of `sdata`; SpatialData
+  only warns.
+- {func}`hp.tb.io.add_table <harpy.tb.io.add_table>` replaces the declared
+  regions with its `region` argument, which must therefore equal the regions
+  that have rows.
+
+A mismatch usually comes from:
+
+- subsetting rows, which keeps every declared region: set the declared
+  regions to those left, or pass them as `region` to `hp.tb.io.add_table`;
+- combining tables with `anndata.concat`, or editing `obs[region_key]`, which
+  leaves rows of regions that are not declared: use `hp.tb.concat`, or update
+  the declared regions.
+
+## Metadata per region
+
+Each of Harpy's records in `uns` describes a matrix, as the diagram above
+shows: a `feature_matrices` record its `.obsm` matrix, `point_aggregation`
+`adata.X` and the class matrices, and `spatial_coordinates["spatial_canonical"]`
+the canonical centers. A record keeps what differs per region under `regions`,
+a mapping keyed by the name of the labels element, one of the regions the
+table annotates (`uns["spatialdata_attrs"]["region"]`, see above); every other
+field describes the whole matrix. The canonical-center and `point_aggregation`
+records, and the `feature_matrices` records of
+{func}`hp.tb.add_feature_matrix <harpy.tb.add_feature_matrix>`, follow this
+rule, and a new writer should too:
+
+- `regions` holds the regions with data: fewer than the table declares when
+  a matrix is computed for some regions only, and, after a subset, regions
+  the table no longer declares. Readers use the declared regions only.
+- The order of `regions` has no meaning: a Zarr store returns its keys
+  sorted. Region order comes from `obs`.
+- Values are strings, integers, `None`, and lists or mappings of these. A
+  `None` in a list does not survive storage: AnnData writes `[None, "a"]` as
+  `["None", "a"]`. A `None` mapping value does.
+- Entries name elements by their type, `points_element` or `image_element`,
+  and a SpatialData coordinate system `coordinate_system`.
+
+A record without `regions` has no per-region source, or keeps it elsewhere:
+the class matrices of
+{func}`hp.tb.aggregate_points <harpy.tb.aggregate_points>` come from the same
+points as `adata.X`, so their sources are in `point_aggregation`, once for
+all of them.
+
+`hp.tb.concat` relies on this rule: the fields other than `regions` must be
+equal in every table, and each table contributes the entries of the regions
+it declares.
 
 ## Keeping records consistent
 
