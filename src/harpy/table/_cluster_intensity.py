@@ -9,7 +9,7 @@ from spatialdata import SpatialData
 from harpy.image._image import _get_spatial_element
 from harpy.table._table import ProcessTable
 from harpy.table.io._add_table import add_table
-from harpy.utils._aggregate import _get_mask_area
+from harpy.utils._aggregate import get_instance_size
 from harpy.utils._keys import _CELLSIZE_KEY
 from harpy.utils.utils import _make_list
 
@@ -107,7 +107,7 @@ def cluster_intensity(
         for i, _labels_name in enumerate(process_table_instance.labels_name):
             log.info(f"Calculating instance size from provided labels element '{_labels_name}'")
             se = _get_spatial_element(sdata, element_name=_labels_name)
-            _shapesize = _get_mask_area(
+            _shapesize = get_instance_size(
                 se.data if se.data.ndim == 3 else se.data[None, ...],
                 instance_key=instance_key,
                 instance_size_key=instance_size_key,
