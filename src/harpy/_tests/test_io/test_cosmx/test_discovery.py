@@ -97,6 +97,35 @@ def test_discovery_rejects_duplicate_morphology(decoded_cosmx_path: Path) -> Non
         _discover_cosmx(decoded_cosmx_path)
 
 
+def test_discovery_selects_complete_code_transcripts_in_older_layout(decoded_cosmx_path: Path) -> None:
+    # Older acquisition software writes two more per-FOV CSVs next to the cell-assigned transcripts.
+    complete_code = {}
+    for fov in range(1, 5):
+        transcript_dir = decoded_cosmx_path / "AnalysisResults" / "analysis" / f"FOV{fov:05d}"
+        prefix = f"Run_83f88b0c-fc17-418d-8cb4-4675e4f6c12a_FOV{fov:05d}_"
+        complete_code[fov] = (transcript_dir / f"{prefix}_complete_code_cell_target_call_coord.csv").resolve()
+        (transcript_dir / f"{prefix}_target_call_coord.csv").write_bytes(b"discovery-must-not-select-this")
+        (transcript_dir / f"{prefix}_total_unambiguous_complete_calls.csv").write_bytes(
+            b"discovery-must-not-select-this"
+        )
+
+    manifest = _discover_cosmx(decoded_cosmx_path, products=("transcripts",))
+
+    assert manifest.available_fovs("transcripts") == (1, 2, 3, 4)
+    assert {fov: manifest.fovs_by_id[fov].transcripts for fov in range(1, 5)} == complete_code
+
+
+def test_discovery_rejects_duplicate_transcripts(decoded_cosmx_path: Path) -> None:
+    analysis_results = decoded_cosmx_path / "AnalysisResults"
+    duplicate_dir = analysis_results / "second_analysis" / "FOV00001"
+    duplicate_dir.mkdir(parents=True)
+    source = next((analysis_results / "analysis" / "FOV00001").glob("*complete_code_cell_target_call_coord.csv"))
+    shutil.copyfile(source, duplicate_dir / source.name)
+
+    with pytest.raises(ValueError, match="Duplicate transcripts files for FOV 1"):
+        _discover_cosmx(decoded_cosmx_path, products=("transcripts",))
+
+
 def test_discovery_reads_one_plex_once(
     decoded_cosmx_path: Path,
     monkeypatch: pytest.MonkeyPatch,
