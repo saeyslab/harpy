@@ -160,7 +160,7 @@ def segmentation_histogram(
     array = array[None, ...] if array.ndim == 2 else array
 
     log.info(f"Calculating cell size for labels element '{labels_name}'.")
-    instance_sizes = get_instance_size(mask=array, run_on_gpu=False)
+    instance_sizes = get_instance_size(mask=array)
     instance_sizes = instance_sizes.loc[instance_sizes[_INSTANCE_KEY] != 0, _CELLSIZE_KEY].dropna()
     if microns_per_pixel != 1:
         log.info(f"Converting cell area from pixels to square microns using microns_per_pixel={microns_per_pixel}.")

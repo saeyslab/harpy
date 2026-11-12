@@ -42,6 +42,7 @@ from harpy.utils._keys import _INSTANCE_KEY
 
 _MOMENT_ORDER = {"count": 0, "sum": 1, "mean": 1, "var": 2, "skew": 3, "kurtosis": 4}
 SUPPORTED_STATS = (*_MOMENT_ORDER, "min", "max", "center_of_mass")
+_MASK_STATS = ("count", "center_of_mass")  # computed from the mask alone
 
 
 @dataclass(frozen=True)
@@ -90,7 +91,8 @@ class MomentAggregator:
     Prototype: per-label statistics of :meth:`harpy.utils.RasterAggregator.aggregate_stats`, plus minimum, maximum and center of mass, in one pass over the image.
 
     Same arguments and output as :meth:`harpy.utils.RasterAggregator.aggregate_stats`. Runs on
-    CPU.
+    CPU. Without an image, only the mask statistics ``"count"`` and ``"center_of_mass"`` are
+    available.
 
     Each task reads the mask of one spatial chunk and at most `max_task_bytes` of image data:
     the channel chunks of a spatial chunk are split into batches of consecutive chunks, and
@@ -103,7 +105,8 @@ class MomentAggregator:
     mask_dask_array
         Integer labels of shape ``('z', 'y', 'x')``.
     image_dask_array
-        Image of shape ``('c', 'z', 'y', 'x')``, with the same spatial chunks as the mask.
+        Image of shape ``('c', 'z', 'y', 'x')``, with the same spatial chunks as the mask. If
+        `None`, only ``"count"`` and ``"center_of_mass"`` can be computed.
     instance_key
         Name of the label id column in the returned DataFrames.
     split_every
@@ -123,7 +126,7 @@ class MomentAggregator:
     def __init__(
         self,
         mask_dask_array: da.Array,
-        image_dask_array: da.Array,
+        image_dask_array: da.Array | None = None,
         instance_key: str = _INSTANCE_KEY,
         split_every: int = 8,
         engine: Literal["numba", "numpy"] = "numba",
@@ -139,21 +142,10 @@ class MomentAggregator:
                 f"'mask_dask_array' has dtype '{mask_dask_array.dtype}', but labels need an integer dtype. "
                 "Cast it, e.g. 'mask_dask_array.astype(np.int32)'."
             )
-        if mask_dask_array.ndim != 3 or image_dask_array.ndim != 4:
-            raise ValueError(
-                f"Expected a mask of shape ('z', 'y', 'x') and an image of shape ('c', 'z', 'y', 'x'), "
-                f"got {mask_dask_array.shape} and {image_dask_array.shape}."
-            )
-        if image_dask_array.shape[1:] != mask_dask_array.shape:
-            raise ValueError(
-                f"The spatial shape of 'image_dask_array' {image_dask_array.shape[1:]} differs from the shape of "
-                f"'mask_dask_array' {mask_dask_array.shape}. Pass arrays that cover the same pixels."
-            )
-        if image_dask_array.chunks[1:] != mask_dask_array.chunks:
-            raise ValueError(
-                f"The spatial chunks of 'image_dask_array' {image_dask_array.chunksize[1:]} differ from the chunks of "
-                f"'mask_dask_array' {mask_dask_array.chunksize}. Rechunk one of them so the chunks match."
-            )
+        if mask_dask_array.ndim != 3:
+            raise ValueError(f"Expected a mask of shape ('z', 'y', 'x'), got shape {mask_dask_array.shape}.")
+        if image_dask_array is not None:
+            _check_image(image_dask_array, mask_dask_array)
         self._mask = mask_dask_array
         self._image = image_dask_array
         self._instance_key = instance_key
@@ -198,12 +190,19 @@ class MomentAggregator:
                 f"Unsupported statistic(s) {invalid} in 'stats_funcs'. Choose from {list(SUPPORTED_STATS)}."
             )
         request = _Request.from_stats(stats_funcs)
+        if request.reads_image and self._image is None:
+            image_stats = [s for s in stats_funcs if s not in _MASK_STATS]
+            raise ValueError(
+                f"Statistic(s) {image_stats} in 'stats_funcs' need an image, but this MomentAggregator has none. "
+                f"Pass 'image_dask_array' when creating it, or request only {list(_MASK_STATS)}."
+            )
 
         mask_blocks = self._mask.to_delayed().ravel()
         # (channel chunks, spatial chunks), same spatial order as mask_blocks
-        image_blocks = self._image.to_delayed().reshape(self._image.numblocks[0], -1)
+        image_blocks = np.empty((0, mask_blocks.size), dtype=object)
         batches = [[]]
         if request.reads_image:
+            image_blocks = self._image.to_delayed().reshape(self._image.numblocks[0], -1)
             channel_nbytes = int(np.prod(self._image.chunksize[1:])) * self._image.dtype.itemsize
             batches = _channel_batches(self._image.chunks[0], channel_nbytes, self._max_task_bytes)
         starts = [np.cumsum((0, *sizes[:-1])) for sizes in self._mask.chunks]
@@ -254,11 +253,10 @@ class MomentAggregator:
                 out["skew"] = _replace_nan(take(result.m3, np.nan) / n / var**1.5, "skew")
             if request.order >= 4:
                 out["kurtosis"] = _replace_nan(take(result.m4, np.nan) / n / var**2 - 3, "kurtosis")
-            low, high = _dtype_extremes(self._image.dtype)
             if request.minimum:
-                out["min"] = take(result.minimum, high)
+                out["min"] = take(result.minimum, _dtype_extremes(self._image.dtype)[1])
             if request.maximum:
-                out["max"] = take(result.maximum, low)
+                out["max"] = take(result.maximum, _dtype_extremes(self._image.dtype)[0])
             if request.center_of_mass:
                 out["center_of_mass"] = take(result.coordinate_sum, np.nan) / n
 
@@ -279,6 +277,25 @@ def _replace_nan(values: NDArray, name: str) -> NDArray:
         log.warning(f"Replacing NaN values in '{name}' with 0 for affected instances.")
         values = np.nan_to_num(values, nan=0)
     return values
+
+
+def _check_image(image: da.Array, mask: da.Array) -> None:
+    if image.ndim != 4:
+        raise ValueError(f"Expected an image of shape ('c', 'z', 'y', 'x'), got shape {image.shape}.")
+    if image.shape[1:] != mask.shape:
+        raise ValueError(
+            f"The spatial shape of 'image_dask_array' {image.shape[1:]} differs from the shape of "
+            f"'mask_dask_array' {mask.shape}. Pass arrays that cover the same pixels."
+        )
+    if image.chunks[1:] != mask.chunks:
+        if image.chunksize[1:] != mask.chunksize:
+            difference = f"chunk sizes, {image.chunksize[1:]} and {mask.chunksize}"
+        else:
+            difference = f"chunk boundaries, with chunk size {mask.chunksize} for both"
+        raise ValueError(
+            f"'image_dask_array' and 'mask_dask_array' have different spatial {difference}. Rechunk the mask "
+            "to the spatial chunks of the image: 'mask_dask_array.rechunk(image_dask_array.chunks[1:])'."
+        )
 
 
 def _dtype_extremes(dtype: np.dtype) -> tuple[float | int, float | int]:

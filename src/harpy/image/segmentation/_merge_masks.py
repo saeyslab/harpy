@@ -175,7 +175,6 @@ def merge_labels(
         index=candidate_ids,
         instance_key="instance_id",
         instance_size_key="instance_size",
-        run_on_gpu=False,
     )
     area_by_candidate_id = {
         int(candidate_id): int(area)
@@ -795,7 +794,6 @@ def match_labels_to_reference(
             index=source_ids,
             instance_key="instance_id",
             instance_size_key="instance_size",
-            run_on_gpu=False,
         )
         area_by_source_id = {
             int(source_id): int(area)
@@ -827,7 +825,6 @@ def match_labels_to_reference(
                 index=candidate_reference_ids,
                 instance_key="instance_id",
                 instance_size_key="instance_size",
-                run_on_gpu=False,
             )
             area_by_reference_id = {
                 int(reference_id): int(area)
