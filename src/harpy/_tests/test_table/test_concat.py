@@ -26,12 +26,16 @@ _PAIRS = (
 
 @pytest.fixture
 def aggregated_sdata(backed_class_aware_sdata):
-    """Return ``backed_class_aware_sdata`` with one backed table per labels and points pair.
+    """Return ``backed_class_aware_sdata`` with one backed table per labels and points pair, in a store of its own.
 
     ``aggregate_points`` aggregates each pair class-aware into ``table_a`` (three
     instances) and ``table_b`` (one instance), which it attaches backed, and
     ``add_feature_matrix`` adds a morphology matrix to each, which it attaches
-    lazily. For the tests that write to or read the store; the others use
+    lazily. Each test gets its own store under ``tmp_path`` and aggregates again,
+    which is slow: use this fixture only in tests that write to the store, such
+    as with ``add_table``, or that need the tables as ``aggregate_points``
+    attaches them, backed. A copy of one shared store would not do for the
+    latter: reopened, its tables load differently. Other tests use
     ``in_memory_tables``, which aggregates once per module.
     """
     return _aggregated(backed_class_aware_sdata)
