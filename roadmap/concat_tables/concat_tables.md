@@ -26,7 +26,7 @@ memory or lazy. `hp.tb.io.add_table` or `hp.tb.io.write_table` stores it;
 def concat(
     tables: Sequence[AnnData] | Mapping[str, AnnData],
     *,
-    label: str | None = None,
+    table_key: str | None = None,
     uns_merge: Literal["same", "unique", "first", "only"] | None = None,
     feature_matrices_key: str = _FEATURE_MATRICES_KEY,
     drop_mismatched_feature_matrices: bool = False,
@@ -35,10 +35,12 @@ def concat(
 
 - `tables`: at least one table. Errors name a table by its key in a mapping,
   otherwise by its position: `tables['s1']`, `tables[0]`.
-- `label`: `obs` column naming each row's table: the keys of a mapping, or
-  the positions as strings (`"0"`, `"1"`, ...) for a sequence, as
-  `anndata.concat` does. It must not be an existing `obs` column of any table:
-  `anndata.concat` would overwrite it silently.
+- `table_key`: `obs` column naming each row's table: the keys of a mapping,
+  or the positions as strings (`"0"`, `"1"`, ...) for a sequence, as
+  `anndata.concat` does with its `label`. It must not be an existing `obs`
+  column of any table: `anndata.concat` would overwrite it silently. Not
+  named `label`, as `anndata.concat` names it: in Harpy, a label is an
+  instance of a labels element.
 - `uns_merge`: the `anndata.concat` strategy for the `uns` entries Harpy does
   not own, passed unchanged; see [`uns`](#uns). `None`, the default as in
   AnnData, drops them, so keeping them is an explicit choice. `"unique"` keeps
@@ -52,8 +54,8 @@ No `join` parameter: the rules below require the same features, `obs`
 columns, layers and `obsm` keys in every table, so an inner and an outer join
 give the same table. `concat` passes `join="inner"` to `anndata.concat`.
 
-Raises `TypeError` for a table that is not an AnnData or that holds backed
-matrices, and `ValueError` for any rule below. Every check runs before the
+Raises `TypeError` for a table that is not an AnnData, and `ValueError` for
+any rule below. Every check runs before the
 table is built, and the inputs are not modified.
 
 Every error says what differs, where, and how to fix it: it names the
@@ -71,7 +73,7 @@ next to `validate_table`. Not `hp.tb.io`: no storage is involved. Not
 
 ```python
 tables = {sample: sdata.tables[f"table_{sample}"] for sample in samples}
-adata = hp.tb.concat(tables, label="sample", uns_merge="unique")
+adata = hp.tb.concat(tables, table_key="sample", uns_merge="unique")
 sdata = hp.tb.io.add_table(
     sdata,
     adata,
@@ -142,11 +144,18 @@ hp.tb.validate_table(sdata, "table")
 
 - The same layers in every table. AnnData 0.13 lists `X` in `adata.layers`
   under the key `None`; the comparison leaves it out.
-- Backed tables are rejected: if `X`, a layer or an `obsm` matrix of any table
-  is a Zarr array or a sparse-dataset handle, as `hp.tb.io.read_table` with
-  `mode="backed"` and `hp.io.read_zarr` with `table_mode="backed"` give, raise
-  `TypeError`, naming the table and the matrix, and say to read the table
-  lazily, the default mode. `anndata.concat` fails on these handles.
+- Backed tables are accepted, as lazy tables. `aggregate_points` attaches its
+  table backed: `X`, its class matrices and `obsm["spatial_canonical"]` are
+  sparse-dataset handles or Zarr arrays (`_aggregation_writer.py`). So are the
+  matrices of `hp.tb.io.read_table` with `mode="backed"` and `hp.io.read_zarr`
+  with `table_mode="backed"`. `anndata.concat` fails on these handles, so
+  `concat` turns each into the Dask array that a lazy read gives, with Harpy's
+  lazy decoder (`_decode_anndata_element(..., mode="lazy")` in
+  `src/harpy/_storage/_anndata.py`, with its default block sizes, as
+  `read_table` reads lazily, and as `_lazy_matrix` does for backed values).
+  This reads no matrix values and leaves the inputs unchanged. A Zarr array
+  without AnnData encoding, which the decoder cannot read, raises, and the
+  error says to wrap it with `dask.array.from_zarr`, as `_matrix_format` does.
 - Each component, `X`, a layer or an `obsm` matrix, has the same format in
   every table: dense, CSR or CSC, or a DataFrame in `obsm`. Different
   components of one table may differ: a table with a CSR `X` and a CSC
@@ -156,7 +165,8 @@ hp.tb.validate_table(sdata, "table")
   (`_matrix_format`) rejects. In memory, it converts mixed formats, and also a
   CSC component, to CSR; lazily, a CSC component stays CSC.
 - Each component, `X`, a layer or an `obsm` matrix, is lazy in every table or
-  in memory in every table. Otherwise raise, naming the component and the
+  in memory in every table; a backed matrix counts as lazy, so a backed table
+  and a lazy one concatenate into a lazy result. Otherwise raise, naming the component and the
   tables, and say to compute it (`adata.X = adata.X.compute()`) or to store the
   table and read it lazily. Different components of one table may differ: a
   lazy `X` with an `obsm["X_pca"]` computed on purpose concatenates with
@@ -191,13 +201,13 @@ says to concatenate count tables, and to compute these afterwards.
 Harpy owns these entries. They are taken out before `anndata.concat`, so that
 `uns_merge` never applies to them, and merged by the rules below:
 
-| Entry                                           | Rule                                                                                                       |
-| ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `spatialdata_attrs`                             | rebuilt, see [rows and annotation](#rows-and-annotation)                                                   |
-| `uns[feature_matrices_key]`                     | [feature-matrix rule](#feature-matrix-rule)                                                                |
-| `point_aggregation`                             | [point-aggregation rule](#point-aggregation-rule)                                                          |
-| `spatial_coordinates["spatial_canonical"]`      | [canonical-center rule](#canonical-center-rule); other entries of `spatial_coordinates` follow `uns_merge` |
-| `<column>_colors` of a categorical `obs` column | [color rule](#color-rule)                                                                                  |
+| Entry                                           | Rule                                                                                                                  |
+| ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `spatialdata_attrs`                             | rebuilt, see [rows and annotation](#rows-and-annotation)                                                              |
+| `uns[feature_matrices_key]`                     | [feature-matrix rule](#feature-matrix-rule)                                                                           |
+| `point_aggregation`                             | [point-aggregation rule](#point-aggregation-rule)                                                                     |
+| `spatial_coordinates`                           | [canonical-center rule](#canonical-center-rule): only `spatial_canonical` is kept, as Harpy writes nothing else there |
+| `<column>_colors` of a categorical `obs` column | [color rule](#color-rule)                                                                                             |
 
 Every other entry goes to `anndata.concat` with `uns_merge`, including a
 `*_colors` entry without a categorical `obs` column. As checked:
@@ -233,22 +243,17 @@ Every other entry goes to `anndata.concat` with `uns_merge`, including a
   fields, such as the source channels of `add_feature_matrix`. Records read
   from storage hold NumPy arrays where records in memory hold lists, so arrays
   are compared as lists.
-- Except the per-region fields of a record of `add_feature_matrix`
-  (`source_kind == "harpy_add_feature_matrix"`): its parallel lists
-  `source_label`, `source_image` and `coordinate_system`, one entry per labels
-  and image pair, differ between samples. They are merged per region, keyed by
-  `source_label`: each table contributes the entries of the regions it
-  declares, so entries of regions it no longer declares drop out, as in the
-  canonical-center rule, and the merged lists follow the result's region
-  order. Every other field of the record is compared, among them
-  `feature_columns`, `source_channels`, `features` and `dtype`. This is how
-  `add_feature_matrix` merges a record when it adds pairs to an existing
-  matrix (`_merge_feature_matrix_metadata`). The merge lives in
-  `src/harpy/table/_add_feature_matrix.py`, which owns the record layout, and
-  `concat` calls it.
+- Except `regions`, the per-region entries (Step 3): a record of
+  `add_feature_matrix` (`source_kind == "harpy_add_feature_matrix"`) has
+  `regions: {labels name: {"image_element": ..., "coordinate_system": ...}}`,
+  which differs between samples. Each table contributes the entries of the
+  regions it declares, so entries of regions it no longer declares drop out,
+  as in the canonical-center rule. Every other field of the record is
+  compared: `feature_columns`, `source_channels` and `features`. A record of
+  schema version 1, as Harpy 0.5 wrote it, fails the check above.
 - Records of other writers, `aggregate_points` and code of the user, have no
-  per-region fields: `aggregate_points` keeps its sources in
-  `point_aggregation`. They are compared whole.
+  `regions`: `aggregate_points` keeps its sources in `point_aggregation`.
+  They are compared whole.
 - Otherwise raise, naming the matrices and the tables where they differ or
   are missing. With `drop_mismatched_feature_matrices=True`, these matrices and
   their records are dropped instead, with a log message naming them. Padding
@@ -270,9 +275,9 @@ Every other entry goes to `anndata.concat` with `uns_merge`, including a
   establish, and returns the entries of the declared regions. Only the
   comparison of each entry with its labels element needs `sdata`, and
   `validate_table` makes it after storing.
-- The merged record holds each table's entries for its declared regions,
-  built with the private schema helpers that `aggregate_points` uses, in
-  schema version 2. Entries of regions a table no longer declares drop out,
+- The merged record holds each table's stored entries for its declared
+  regions, which the check above parsed, in schema version 2. Entries of
+  regions a table no longer declares drop out,
   so a table split per region and concatenated back works; a union of whole
   records would hold each region twice. A version-1 input fails the check
   above, whose message says to rebuild its centers with
@@ -343,31 +348,154 @@ in #283 and provides `_validate_canonical_centers_without_sources`.
 
 In `src/harpy/table/_concat.py`, in this order:
 
-1. Normalize `tables` to names and tables; raise for none. Read each table's
-   annotation with `_spatialdata_annotation(table, function="concat")`.
-2. Per table: no backed matrix in `X`, layers or `obsm`; the annotation's row
-   checks (`_validate_table_annotation_without_sdata`);
-   `_validate_feature_matrices`; and
-   `_validate_canonical_centers_without_sources` if canonical components are
-   present.
+1. Normalize `tables` to names and tables; raise for none, and raise a
+   `TypeError` for a table that is not an AnnData. A table without a
+   SpatialData annotation raises in the per-table checks of item 2.
+2. Per table: the annotation's row checks
+   (`_validate_table_annotation_without_sdata`); `_validate_feature_matrices`;
+   and `_validate_canonical_centers_without_sources` if canonical components
+   are present.
 3. Across tables: annotation keys, regions, `obs_names`, `obs` columns and
-   their dtypes, `label`, `var_names`, layers, `obsm` keys and widths, the
-   format of each component (`_matrix_format`) and whether it is lazy.
+   their dtypes, `table_key`, `var_names`, layers, `obsm` keys and widths, the
+   format of each component (`_matrix_format`, which reads the format of a
+   backed matrix from its metadata) and whether it is lazy, a backed matrix
+   counting as lazy.
 4. Merge the records: feature matrices, with the matrices to drop and the
    per-region fields of `add_feature_matrix` records merged by region;
    canonical centers; point aggregation.
 5. Prepare each table without copying its matrices, as `add_table` does: no
    Harpy-owned `uns` entries, no dropped matrices, no `obsp`, `varp`, `varm`
-   or `raw`.
+   or `raw`, and each backed matrix turned into a lazy one with
+   `_decode_anndata_element(..., mode="lazy")`.
 6. `anndata.concat(prepared, join="inner", merge="same", uns_merge=uns_merge,
-label=label)`, with a mapping passed as a mapping.
+label=table_key)`, with a mapping passed as a mapping.
 7. Set `spatialdata_attrs` and the merged records; merge the palettes of the
    categorical `obs` columns by the [color rule](#color-rule), in the result's
    category order; check with `TableModel.validate`, and log what was dropped
    or merged, and why, including the top-level `uns` keys that `uns_merge`
    dropped.
 
-### Step 3: documentation
+### Step 3: follow-up, one layout for the per-region metadata
+
+Three records keep metadata per region in `uns`: canonical centers, point
+aggregation and the feature matrices of `add_feature_matrix`. The region names
+repeat `obs[region_key]`, but the values do not: they name the labels, points
+or image and the coordinate system each region came from, which neither the
+matrix nor SpatialData's annotation records. AnnData neither subsets nor
+concatenates `uns`, so `concat` merges these records itself. This step gives
+them one layout, merged by one function. It is a breaking change of the
+stored layout of `add_feature_matrix` records, and of the feature-matrix
+schema version.
+
+Current layouts:
+
+- Canonical centers, `uns["spatial_coordinates"]["spatial_canonical"]`:
+  `schema_version`, `axes`, and `regions: {labels name: {...}}`, with an entry
+  for every declared region.
+- Point aggregation, `uns["point_aggregation"]`: `schema_version`,
+  `source_kind`, `feature_key`, `feature_class_key` (class-aware only), and
+  `regions: {labels name: {"points_element": ..., "coordinate_system": ...}}`.
+- `add_feature_matrix`, `uns["feature_matrices"][key]`: whole-matrix fields
+  (`schema_version`, `source_kind`, `feature_columns`, `backend`, `dtype`,
+  `source_channels`, `features`) and three parallel lists, `source_label`,
+  `source_image` and `coordinate_system`, one entry per region the matrix was
+  computed for.
+- Other feature-matrix records, of `aggregate_points` and of the user's code:
+  no per-region fields.
+
+Each layout has its own merge: `_merged_canonical_record` and
+`_merged_point_aggregation`, with `_POINT_AGGREGATION_HEADER`, in
+`_concat.py`, and `_merge_feature_matrix_metadata`,
+`_concat_feature_matrix_metadata`, `_record_sources`, `_with_sources` and
+`_without_sources` in `_add_feature_matrix.py`. The parallel lists also lose
+`None`: AnnData stores a list of `None` and strings as strings, so the record
+of a morphology-only matrix, which has no image, reads back from Zarr with
+`source_image == ["None"]`. A `None` dict value survives. The storage test of
+`source_image` checks an in-memory table only.
+
+**The rule.** The metadata of a matrix has two parts:
+
+- whole-matrix fields, every field except `regions`, equal in every table
+  that `concat` joins;
+- `regions`, the per-region entries:
+  1. keyed by labels element name, the SpatialData region;
+  2. holding the regions with data: fewer than the table declares when a
+     matrix was computed for some regions only, with NaN in the others; and,
+     after a subset, regions the table no longer declares. Readers use the
+     declared regions only;
+  3. without a meaningful order: a Zarr round trip returns the keys sorted,
+     not in the order written. Region order comes from `obs`;
+  4. holding per-region values only: fields of the whole matrix, such as
+     `source_channels` and `features`, stay at the top level;
+  5. with values that survive a Zarr round trip: strings, integers, `None`,
+     and lists or dicts of these;
+  6. naming elements by their type, `points_element` and `image_element`,
+     and a SpatialData coordinate system `coordinate_system`.
+
+Changes:
+
+- `add_feature_matrix` stores
+  `regions: {labels name: {"image_element": image name or None, "coordinate_system": name}}`
+  in place of the three lists. It drops `backend` and `dtype`, which nothing
+  reads: `backend: "numpy"` is wrong for a lazy matrix, which
+  `add_feature_matrix` itself attaches when `sdata` is backed, and `dtype`
+  goes stale when the matrix is cast; `validate_table` checks neither, on
+  purpose. Its other whole-matrix fields do not change.
+- Two functions, in `src/harpy/table/_metadata.py`, next to the names of
+  the metadata, merge one record across tables. `_comparable_metadata`
+  moves there from `_utils.py`.
+  `_metadata_difference` compares the fields other than `regions`, arrays
+  as lists, and returns the first table whose fields differ, with those
+  fields; `_merged_metadata` takes each table's entries for the regions it
+  declares. A record without `regions` is compared and kept whole.
+  `_differing_fields` moves there from `_concat.py`. Neither raises: each
+  caller words its error, so the messages keep saying how to fix it:
+  aggregate every table the same way for point aggregation,
+  `drop_mismatched_feature_matrices` for feature matrices. They are two
+  because `concat` finds the mismatched feature matrices before it merges
+  the others. Canonical centers need no comparison: the parse of each table
+  fixes their fields other than `regions`. `concat` uses them
+  for canonical centers, point aggregation and every feature-matrix record,
+  in place of the helpers above, and `_log_left_out_regions` reads each
+  record's `regions`. Which tables must hold a record stays with the caller:
+  every table or none for canonical centers and point aggregation, and
+  `drop_mismatched_feature_matrices` for feature matrices. When
+  `add_feature_matrix` updates some regions, it replaces their entries and
+  keeps the others.
+- Canonical centers do not change; they stay at schema version 2. They
+  already follow the rule. Their entries repeat fixed values
+  (`source_element_type`, `source_scale`, `coordinate_frame`), but these need
+  no merge. The layout is a public contract, in `docs/canonical_centers.md`,
+  which Spatiato reads, and version 2 chose recently that each entry states
+  its frame ([canonical_cache.md](canonical_cache.md)). If a version 3 is
+  needed for another reason, the fixed values can move to the top level then.
+- Point aggregation does not change. Its `regions` is the only record of the
+  points element and coordinate system each region was aggregated from.
+- `_FEATURE_MATRIX_SCHEMA_VERSION` goes to 2, for every writer of a
+  feature-matrix record. A record of version 1, as Harpy 0.5 wrote it, fails
+  `validate_table`, `concat` and `hp.qc.summarize_table`, with a message to
+  compute the matrix again with the function its `source_kind` names, and a
+  regional update of `add_feature_matrix` rejects it as incompatible, with a
+  message to remove the matrix with `hp.tb.io.remove_table_components` and
+  compute it again. This also fails the class matrices of `aggregate_points`
+  from Harpy 0.5, whose layout does not change: one version for the whole
+  contract keeps it simple to reason about, and needs no code that
+  recognizes the older layout. The older layout is not converted on read.
+- Docs: `docs/development/metadata.md` states the rule, for new writers to
+  follow, says that the class matrices of `aggregate_points` have no
+  `regions` because their sources are in `point_aggregation`, once for them
+  and `X`, and describes `regions` in place of the lists; so does the
+  [feature-matrix rule](#feature-matrix-rule). In the `concat` docstring,
+  `drop_mismatched_feature_matrices` compares the metadata whole except
+  `regions`, in place of "except the sources of each region in the metadata
+  of `add_feature_matrix`".
+- Tests: test 7 becomes a test of the merge function; the `concat` and
+  `add_feature_matrix` tests read `regions` and do not depend on its order; a
+  morphology-only record read back from Zarr has `image_element` `None`; a
+  record of schema version 1 raises in `validate_table`, `concat` and a
+  regional update; tests that write records by hand write version 2.
+
+### Step 4: documentation
 
 - `docs/api.md`: `tb.concat` under Table, "Processing and analysis", next to
   `tb.validate_table`.
@@ -415,7 +543,7 @@ label=label)`, with a mapping passed as a mapping.
   they are, also those of per-table analyses, such as PCA, neighbors, UMAP or
   a clustering: recompute these after concatenating.
 
-### Step 4: follow-up, lazy-matrix helpers in `_storage`, no change in behaviour
+### Step 5: follow-up, lazy-matrix helpers in `_storage`, no change in behaviour
 
 `concat` does not depend on this step: the helpers fit better in `_storage`.
 
@@ -428,25 +556,70 @@ label=label)`, with a mapping passed as a mapping.
   component writer and `concat` import them from `_storage`.
 - Tests: the existing tests, unchanged.
 
+### Step 6: follow-up, metadata names in `_metadata.py`, no change in behaviour
+
+The names of the table metadata in `adata.uns` are spread out:
+`src/harpy/table/_metadata.py` holds the point-aggregation key, the schema
+versions and the source kind of `aggregate_points`;
+`src/harpy/utils/_keys.py` holds `_FEATURE_MATRICES_KEY`;
+`_add_feature_matrix.py` holds its own `_SOURCE_KIND`; and the field names are
+string literals in about ten modules, most in `_add_feature_matrix.py`,
+`_aggregation_writer.py`, `_validation.py`, `_concat.py` and, in the merge
+functions of Step 3, `_metadata.py` itself.
+
+- `_metadata.py` defines every key, field name, source kind and schema
+  version of the table metadata, in sections laid out as the stored
+  metadata, and its docstring links to `docs/development/metadata.md`:
+  - fields that several kinds share: `schema_version`, `source_kind`,
+    `regions` and, in a `regions` entry, `coordinate_system`;
+  - `uns["feature_matrices"]`: the key, the schema version and
+    `feature_columns`; the source kind of `add_feature_matrix` and its
+    `source_channels`, `features` and, in a `regions` entry,
+    `image_element`;
+  - `uns["point_aggregation"]`: the key, the schema version, the source kind
+    of `aggregate_points`, `feature_key`, `feature_class_key` and, in a
+    `regions` entry, `points_element`.
+- `_FEATURE_MATRICES_KEY` moves there from `utils/_keys.py`, and
+  `_SOURCE_KIND` from `_add_feature_matrix.py`, as
+  `_ADD_FEATURE_MATRIX_SOURCE_KIND`. Code reads and writes the metadata
+  through these names, not through string literals: a typo fails at import,
+  and the uses of a field are found by its name. A stored name still changes
+  only with a new schema version.
+- Canonical centers keep their names in `harpy.table.canonical_centers`, the
+  public import boundary, which exports `CANONICAL_OBSM_KEY` and
+  `SPATIAL_COORDINATES_KEY` and has its own parser; `_metadata.py` points
+  there.
+- The names keep a leading underscore, as the existing constants.
+- Out of scope: the feature panels in `sdata.attrs["harpy"]`, whose
+  `feature_key` and `feature_class_key` belong to another record.
+- Tests: the existing tests, unchanged. They keep string literals, which pin
+  the stored format: a test that used a constant would still pass if the
+  constant, and with it the stored format, changed by mistake.
+
 ## Tests
 
 In `src/harpy/_tests/test_table/test_concat.py`. Fixture:
 `backed_class_aware_sdata`, with two labels and points pairs; `aggregate_points`
 with `expression_class="Endogenous"` once per pair, into `table_a` and
-`table_b`.
+`table_b`, which it attaches backed. `table_a` has three instances, `table_b`
+one. `add_feature_matrix` then adds a morphology matrix to each table, which
+it attaches lazily.
 
-1. Round trip, with `table_b` subset to part of its rows first, as per-cell
-   QC does: `concat`, `add_table`, then `validate_table` passes. Rows and
+1. Round trip, with `table_a` subset to part of its rows first, as per-cell
+   QC does: `concat`, `add_table`, then `validate_table` passes. Both tables
+   are loaded into memory first: subsetting loads backed matrices but keeps
+   lazy ones lazy, so a subset of `table_a` would have a lazy morphology
+   matrix and an in-memory `X`. Rows and
    regions are united, the feature-matrix registry is kept once, the regions
-   of the canonical and point-aggregation records are united, and `label`
-   names each row's table. An `obsp` graph is dropped, with the warning. A
+   of the canonical and point-aggregation records are united, and the
+   `table_key` column names each row's table. An `obsp` graph is dropped, with the warning. A
    morphology feature matrix of `add_feature_matrix`, which needs no image,
-   computed on each table, is kept: its merged record lists both tables'
-   `source_label`, `source_image` and `coordinate_system` in the result's
-   region order.
-2. Lazy stays lazy: the stored tables, read lazily, give Dask `X` and `obsm`
-   matrices without computing. An `obsm` matrix computed in every table stays
-   in memory.
+   computed on each table, is kept: its merged record holds both tables'
+   `regions` entries, with `image_element` `None`, read back from the store.
+2. Lazy stays lazy: the backed tables of `aggregate_points` give Dask `X` and
+   `obsm` matrices, and so do the same tables read lazily, and a backed table
+   with a lazy one. The inputs keep their backed matrices. An `obsm` matrix
+   computed in every table stays in memory.
 3. A mismatched registered matrix raises; with
    `drop_mismatched_feature_matrices=True`, it is dropped with its record.
 4. `uns_merge="unique"` keeps records keyed per table, and Harpy's records
@@ -457,20 +630,21 @@ with `expression_class="Endogenous"` once per pair, into `table_a` and
    category order, whatever `uns_merge` is. A category with two colors keeps
    the first table's, with a warning. A table that holds a category but has
    no palette drops the merged palette, with a warning.
-6. One parametrized test for the other rules that raise: a backed table, a
-   shared region, different `var_names`, different `obs` columns, layers or
-   `obsm` keys, an `obs` column with different dtypes (the instance column as
+6. One parametrized test for the other rules that raise: a Zarr array without
+   AnnData encoding, a shared region, different `var_names`, different `obs` columns, layers or
+   `obsm` keys, an `obsm` matrix with different widths, an `obs` column with different dtypes (the instance column as
    `int64` and `uint64`; a `bool` and an `int64` column), while categorical
    columns with different categories pass, a component that is CSR in one table
    and CSC in another, a component that is lazy in one table and in memory in
-   another, a `label` that is an `obs` column, duplicate `obs_names`, and
+   another, a `table_key` that is an `obs` column, duplicate `obs_names`, and
    canonical centers in one table only.
-7. In `src/harpy/_tests/test_table/test_add_feature_matrix.py`, next to the
-   module that owns the record layout: a unit test of the per-region merge of
-   `add_feature_matrix` records. A record that still lists a region its table
-   no longer declares contributes only the declared regions, the merged lists
-   follow the given region order, and records whose `source_channels` differ
-   raise.
+7. A unit test of `_merged_metadata` and `_metadata_difference`
+   (`src/harpy/table/_metadata.py`), in `test_concat.py`: a record that still
+   holds a region its table no longer declares contributes only the declared
+   regions, a record read from storage, with arrays, compares equal to one in
+   memory, a differing field is reported with the table's position, and a
+   record without `regions` is kept whole. Test 6 includes an
+   `add_feature_matrix` record of schema version 1.
 
 ## Departures from the issue
 
@@ -485,7 +659,7 @@ with `expression_class="Endogenous"` once per pair, into `table_a` and
    whole records.
 4. `obs` columns must be the same in every table; the issue only stacks them.
 5. `varm` and `raw` are dropped, like `obsp` and `varp`.
-6. Added checks: the dtype of every `obs` column, a `label` that collides,
+6. Added checks: the dtype of every `obs` column, a `table_key` that collides,
    duplicate `obs_names`.
 7. A component that is lazy in one table and in memory in another raises;
    `concat` converts no matrix.
@@ -501,8 +675,9 @@ with `expression_class="Endogenous"` once per pair, into `table_a` and
   covers it.
 - A `join` parameter, an outer join on `var`, and `index_unique` for colliding
   `obs_names`.
-- Backed tables: rejected, rather than wrapped as Dask arrays. Read them
-  lazily.
+- Attaching the table of `aggregate_points` lazily, as `add_table` does,
+  rather than backed: it would change that function, and `concat` accepts
+  backed tables.
 - A component that is lazy in one table and in memory in another: rejected,
   rather than converted. Wrapping its in-memory matrices with `_lazy_matrix`
   could be added later without breaking anything, as it only accepts what is
