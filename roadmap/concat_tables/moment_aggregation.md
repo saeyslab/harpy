@@ -235,6 +235,23 @@ the kernels and after a restart that loads them from the cache.
    Reading the labels alone takes 5.9 s in a new process, so the new engine
    spends about 1 s beyond reading.
 
+9. **One read of the labels in `add_feature_matrix`.** For a new table with
+   intensity features and `area`, each labels element was read four times:
+   `_da_unique` for the rows of the table, `_da_unique` again for the index of
+   the aggregation, the intensity pass, and a separate pass for `area`. Now:
+   - the aggregation runs without an index, and the instance ids come from its
+     result, background dropped;
+   - the features split by how they are computed: one `MomentAggregator` pass
+     gives the intensity features and `area` (its `"count"`), without the
+     image when only `area` is requested, and `regionprops` the other
+     morphology features;
+   - a new table is built after the calculation, from the calculated
+     `(region_key, instance_key)` pairs, in the same order as before.
+
+   `regionprops` features still load the mask in memory. New tables are
+   identical to before in six cases on the MIBI example. On the Xenium slide,
+   a new table with `mean` and `area` takes 8.5–8.7 s instead of 14.8–16.9 s.
+
 ## Expected differences
 
 Compared with `RasterAggregator` on the Xenium slide:
