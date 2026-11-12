@@ -29,7 +29,7 @@ class DistributionAggregator:
     """
     Per-instance distribution statistics of image intensities (median, quantiles, IQR, MAD), computed out of core.
 
-    Unlike the statistics of :class:`harpy.utils.RasterAggregator`, quantiles cannot be
+    Unlike the statistics of :class:`harpy.utils.MomentAggregator`, quantiles cannot be
     combined from per-chunk partial results: they need all pixel values of an instance at
     once. This class computes them tile by tile, without extracting instance windows first.
 

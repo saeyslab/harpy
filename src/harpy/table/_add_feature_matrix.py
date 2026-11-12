@@ -14,9 +14,20 @@ from spatialdata import SpatialData
 from spatialdata.models import TableModel
 
 from harpy._storage._anndata import _matrix_format, _MissingAnnDataElement, _read_anndata_element
-from harpy.experimental._moments import MomentAggregator
 from harpy.image._image import _get_translation, _precondition, get_dataarray
-from harpy.table._metadata import _FEATURE_MATRIX_SCHEMA_VERSION
+from harpy.table._metadata import (
+    _ADD_FEATURE_MATRIX_SOURCE_KIND,
+    _COORDINATE_SYSTEM_FIELD,
+    _FEATURE_COLUMNS_FIELD,
+    _FEATURE_MATRICES_KEY,
+    _FEATURE_MATRIX_SCHEMA_VERSION,
+    _FEATURES_FIELD,
+    _IMAGE_ELEMENT_FIELD,
+    _REGIONS_FIELD,
+    _SCHEMA_VERSION_FIELD,
+    _SOURCE_CHANNELS_FIELD,
+    _SOURCE_KIND_FIELD,
+)
 from harpy.table._regionprops import _calculate_regionprop_features
 from harpy.table._validation import _RESERVED_OBSM_KEYS
 from harpy.table.io._add_table import add_table
@@ -24,7 +35,8 @@ from harpy.table.io._components import _check_in_memory_versus_storage_axes, _co
 from harpy.table.io._components_by_region import add_table_components_by_region
 from harpy.table.io._write_validation import _validated_observation_pairs
 from harpy.utils._aggregate import get_instance_size
-from harpy.utils._keys import _CELL_INDEX, _FEATURE_MATRICES_KEY, _INSTANCE_KEY, _REGION_KEY
+from harpy.utils._keys import _CELL_INDEX, _INSTANCE_KEY, _REGION_KEY
+from harpy.utils._moments import MomentAggregator
 from harpy.utils.utils import _da_unique, _make_list
 
 _INTENSITY_FEATURES = ("sum", "mean", "var", "min", "max", "kurtosis", "skew")
@@ -43,7 +55,6 @@ _MORPHOLOGY_FEATURES = (
     "centroid_dif",
 )
 _UNSUPPORTED_3D_MORPHOLOGY_FEATURES = ("eccentricity", "perimeter", "perim_square_over_area")
-_SOURCE_KIND = "harpy_add_feature_matrix"
 
 
 @dataclass(frozen=True)
@@ -397,13 +408,13 @@ def add_feature_matrix(
     # The metadata of each labels region goes under "regions", keyed by the labels element,
     # so that regional updates and hp.tb.concat merge it by region.
     metadata = {
-        "feature_columns": list(columns),
-        "schema_version": _FEATURE_MATRIX_SCHEMA_VERSION,
-        "source_kind": _SOURCE_KIND,
-        "source_channels": source_channels,
-        "features": list(requested_features),
-        "regions": {
-            pair.labels_name: {"image_element": pair.image_name, "coordinate_system": pair.coordinate_system}
+        _FEATURE_COLUMNS_FIELD: list(columns),
+        _SCHEMA_VERSION_FIELD: _FEATURE_MATRIX_SCHEMA_VERSION,
+        _SOURCE_KIND_FIELD: _ADD_FEATURE_MATRIX_SOURCE_KIND,
+        _SOURCE_CHANNELS_FIELD: source_channels,
+        _FEATURES_FIELD: list(requested_features),
+        _REGIONS_FIELD: {
+            pair.labels_name: {_IMAGE_ELEMENT_FIELD: pair.image_name, _COORDINATE_SYSTEM_FIELD: pair.coordinate_system}
             for pair in pair_specs
         },
     }
@@ -525,11 +536,11 @@ def _merge_feature_matrix_metadata(previous: object, current: dict) -> dict:
     """
     if (
         not isinstance(previous, Mapping)
-        or previous.get("schema_version") != _FEATURE_MATRIX_SCHEMA_VERSION
-        or previous.get("source_kind") != _SOURCE_KIND
-        or not isinstance(previous.get("regions"), Mapping)
-        or not np.array_equal(previous.get("feature_columns"), current["feature_columns"])
-        or not np.array_equal(previous.get("source_channels"), current["source_channels"])
+        or previous.get(_SCHEMA_VERSION_FIELD) != _FEATURE_MATRIX_SCHEMA_VERSION
+        or previous.get(_SOURCE_KIND_FIELD) != _ADD_FEATURE_MATRIX_SOURCE_KIND
+        or not isinstance(previous.get(_REGIONS_FIELD), Mapping)
+        or not np.array_equal(previous.get(_FEATURE_COLUMNS_FIELD), current[_FEATURE_COLUMNS_FIELD])
+        or not np.array_equal(previous.get(_SOURCE_CHANNELS_FIELD), current[_SOURCE_CHANNELS_FIELD])
     ):
         raise ValueError(
             "Existing feature metadata must have a compatible schema, as add_feature_matrix writes it with schema "
@@ -540,7 +551,7 @@ def _merge_feature_matrix_metadata(previous: object, current: dict) -> dict:
     return {
         **deepcopy(dict(previous)),
         **current,
-        "regions": {**deepcopy(dict(previous["regions"])), **current["regions"]},
+        _REGIONS_FIELD: {**deepcopy(dict(previous[_REGIONS_FIELD])), **current[_REGIONS_FIELD]},
     }
 
 

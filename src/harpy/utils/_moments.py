@@ -1,6 +1,6 @@
-"""Prototype of a single-pass replacement for :meth:`harpy.utils.RasterAggregator.aggregate_stats`.
+"""Per-label statistics of an image and a labels mask in one pass: :class:`MomentAggregator`.
 
-Two changes compared to :class:`~harpy.utils.RasterAggregator`:
+Two design choices keep this fast and its memory low:
 
 1. All statistics in one pass. Each chunk returns, per label present in it, the count, the
    mean and the centered sums ``M2, M3, M4`` of every channel, plus the minimum, the maximum
@@ -17,7 +17,7 @@ Two changes compared to :class:`~harpy.utils.RasterAggregator`:
    the image is read once instead of once per statistic.
 2. Cheap and sparse per-chunk work. Labels are grouped with a lookup table over the label
    range of the chunk (``O(n)``) instead of a sort, and each chunk only returns the labels
-   present in it, instead of a row for every label in the mask. A task handles one spatial
+   present in it, not a row for every label in the mask. A task handles one spatial
    chunk and as many of its channel chunks as fit in ``max_task_bytes``. The per-pixel kernels
    and the merge of partial results are compiled loops that release the GIL; the merge adds
    every partial straight into the output arrays, without temporaries of the output size.
@@ -88,11 +88,13 @@ _CHANNEL_FIELDS = ("mean", "m2", "m3", "m4", "minimum", "maximum")
 
 class MomentAggregator:
     """
-    Prototype: per-label statistics of :meth:`harpy.utils.RasterAggregator.aggregate_stats`, plus minimum, maximum and center of mass, in one pass over the image.
+    Per-label statistics of an image and a labels mask, in one pass over both.
 
-    Same arguments and output as :meth:`harpy.utils.RasterAggregator.aggregate_stats`. Runs on
-    CPU. Without an image, only the mask statistics ``"count"`` and ``"center_of_mass"`` are
-    available.
+    For every label, it computes the pixel count, the center of mass, and the sum, mean,
+    variance, skewness, kurtosis, minimum and maximum of each channel. All statistics that one
+    :meth:`aggregate_stats` call requests come from one pass over the image and the labels, with
+    Dask, on the CPU. Without an image, only the mask statistics ``"count"`` and
+    ``"center_of_mass"`` are available.
 
     Each task reads the mask of one spatial chunk and at most `max_task_bytes` of image data:
     the channel chunks of a spatial chunk are split into batches of consecutive chunks, and
@@ -121,6 +123,22 @@ class MomentAggregator:
         Most image data one task reads, as a number of bytes or a string such as ``"256MiB"``.
         Smaller values lower the memory per task when a spatial chunk holds many channels, but
         every extra batch groups the labels of the spatial chunk again, which costs time.
+
+    Examples
+    --------
+    .. code-block:: python
+
+        import harpy as hp
+
+        sdata = hp.datasets.pixie_example()
+        image = hp.im.get_dataarray(sdata, element_name="raw_image_fov0").data[:, None]  # ('c', 'z', 'y', 'x')
+        labels = hp.im.get_dataarray(sdata, element_name="label_whole_fov0").data[None]  # ('z', 'y', 'x')
+
+        aggregator = hp.utils.MomentAggregator(
+            mask_dask_array=labels.rechunk(image.chunks[1:]),  # same spatial chunks as the image
+            image_dask_array=image,
+        )
+        mean, count, center = aggregator.aggregate_stats(("mean", "count", "center_of_mass"))
     """
 
     def __init__(
@@ -171,16 +189,22 @@ class MomentAggregator:
 
         Returns
         -------
-        One DataFrame per statistic, in the order of `stats_funcs`, as returned by
-        :meth:`harpy.utils.RasterAggregator.aggregate_stats`, with a column per channel and a
-        column with the label id. Exceptions:
+        One DataFrame per statistic, in the order of `stats_funcs`, with a row per label of
+        `index` and a column `instance_key` with the label id:
 
-        - ``"count"`` has one column with the number of pixels.
-        - ``"min"`` and ``"max"`` keep the image dtype. As in
-          :meth:`harpy.utils.RasterAggregator.aggregate_min`, a label of `index` that is absent
-          from the mask gets the largest (``"min"``) or smallest (``"max"``) value of that dtype.
-        - ``"center_of_mass"`` has columns ``0, 1, 2`` with the mean ``z, y, x`` pixel
-          coordinate in float64, as :meth:`harpy.utils.RasterAggregator.center_of_mass`.
+        - ``"sum"``, ``"mean"``, ``"var"``, ``"skew"`` and ``"kurtosis"``: one float32 column per
+          channel, ``0, 1, ...``. With ``m_p`` the ``p``-th central moment of a label, the
+          variance is ``m_2``, the skewness ``m_3 / m_2**1.5`` and the kurtosis the excess
+          kurtosis ``m_4 / m_2**2 - 3``. A label with zero variance gets skewness and kurtosis
+          0, with a warning.
+        - ``"count"``: one float32 column ``0`` with the number of pixels.
+        - ``"min"`` and ``"max"``: one column per channel, in the image dtype.
+        - ``"center_of_mass"``: columns ``0, 1, 2`` with the mean ``z, y, x`` pixel coordinate,
+          in float64.
+
+        A label of `index` that is absent from the mask gets count and sum 0, NaN for the mean,
+        variance and center of mass, 0 for skewness and kurtosis, and the largest (``"min"``)
+        or smallest (``"max"``) value of the image dtype.
         """
         if isinstance(stats_funcs, str):
             stats_funcs = (stats_funcs,)
@@ -272,7 +296,7 @@ class MomentAggregator:
 
 
 def _replace_nan(values: NDArray, name: str) -> NDArray:
-    # same behaviour as RasterAggregator: zero variance gives NaN, which is replaced by 0
+    # zero variance, or a label absent from the mask, gives NaN, which is replaced by 0
     if np.isnan(values).any():
         log.warning(f"Replacing NaN values in '{name}' with 0 for affected instances.")
         values = np.nan_to_num(values, nan=0)

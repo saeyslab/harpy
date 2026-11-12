@@ -13,11 +13,11 @@ from numpy.typing import NDArray
 from spatialdata import SpatialData
 from spatialdata.transformations import get_transformation
 
-from harpy.experimental._moments import MomentAggregator
 from harpy.image._image import get_dataarray
 from harpy.image.segmentation._grid import add_grid_labels
 from harpy.utils._featurize import Featurizer
 from harpy.utils._keys import _INSTANCE_KEY, _SPATIAL
+from harpy.utils._moments import MomentAggregator
 
 try:
     import squidpy as sq

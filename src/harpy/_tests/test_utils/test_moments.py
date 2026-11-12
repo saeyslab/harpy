@@ -4,8 +4,9 @@ import pandas as pd
 import pytest
 from scipy import ndimage
 
-from harpy.experimental import MomentAggregator
-from harpy.experimental._moments import (
+from harpy.utils import MomentAggregator
+from harpy.utils._aggregate import RasterAggregator
+from harpy.utils._moments import (
     _channel_batches,
     _chunk_partial,
     _group_labels,
@@ -13,7 +14,6 @@ from harpy.experimental._moments import (
     _merge_numba,
     _Partial,
 )
-from harpy.utils import RasterAggregator
 
 STATS = ("sum", "mean", "count", "var", "kurtosis", "skew")
 
@@ -231,7 +231,7 @@ def test_channel_batches_follow_max_task_bytes(monkeypatch):
         blocks_per_task.append(len(image_blocks))
         return _chunk_partial(mask_block, offset, request, engine, *image_blocks)
 
-    monkeypatch.setattr("harpy.experimental._moments._chunk_partial", record)
+    monkeypatch.setattr("harpy.utils._moments._chunk_partial", record)
     # one channel of a spatial chunk is 40 * 50 * 2 bytes, so a task gets at most two channel chunks
     actual = MomentAggregator(mask_da, image_da, max_task_bytes="8000B").aggregate_stats(stats)
     assert sorted(blocks_per_task) == [1] * 9 + [2] * 18  # 9 spatial chunks, channel batches [0, 1], [2, 3], [4]

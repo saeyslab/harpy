@@ -33,6 +33,7 @@ from harpy.qc.table._summarize_table import (
     _with_region_categories,
 )
 from harpy.qc.table._table_summary_metadata import TableSummaryMetadata
+from harpy.table._metadata import _FEATURE_COLUMNS_FIELD
 from harpy.table._utils import _spatialdata_annotation
 
 
@@ -290,8 +291,8 @@ def _check_names_still_fit(adata: AnnData, classes: tuple[_FeatureClassMatrix, .
         else:
             fits = entry.matrix.shape[1] == len(names)
             record = records.get(entry.key)
-            if fits and isinstance(record, Mapping) and "feature_columns" in record:
-                fits = tuple(str(name) for name in record["feature_columns"]) == names
+            if fits and isinstance(record, Mapping) and _FEATURE_COLUMNS_FIELD in record:
+                fits = tuple(str(name) for name in record[_FEATURE_COLUMNS_FIELD]) == names
         if not fits:
             raise ValueError(
                 f"adata.{entry.location} no longer has the columns that the summary named; recompute summarize_table()."

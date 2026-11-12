@@ -24,9 +24,15 @@ from spatialdata import SpatialData
 from spatialdata.models import TableModel
 
 from harpy._feature_panels import _require_mapping, _require_nonempty_string
-from harpy.table._metadata import _FEATURE_MATRIX_SCHEMA_VERSION
+from harpy.table._metadata import (
+    _FEATURE_COLUMNS_FIELD,
+    _FEATURE_MATRICES_KEY,
+    _FEATURE_MATRIX_SCHEMA_VERSION,
+    _SCHEMA_VERSION_FIELD,
+    _SOURCE_KIND_FIELD,
+)
 from harpy.table.canonical_centers import CANONICAL_OBSM_KEY, validate_canonical_centers
-from harpy.utils._keys import _FEATURE_MATRICES_KEY, _SPATIAL
+from harpy.utils._keys import _SPATIAL
 
 # .obsm keys that tools read as coordinates; no feature matrix may use them.
 _RESERVED_OBSM_KEYS = frozenset({CANONICAL_OBSM_KEY, _SPATIAL})
@@ -298,7 +304,7 @@ def _validate_feature_matrix_record(
             f"Registered feature matrix {matrix_name!r} must have shape (n_obs, n_features), found {matrix.shape}."
         )
     columns = _metadata_string_sequence(
-        record.get("feature_columns"),
+        record.get(_FEATURE_COLUMNS_FIELD),
         path=f"{feature_matrices_key}.{matrix_name}.feature_columns",
     )
     if len(columns) != matrix.shape[1]:
@@ -306,16 +312,16 @@ def _validate_feature_matrix_record(
             f"Registered feature matrix {matrix_name!r} has {matrix.shape[1]} columns but its metadata "
             f"declares {len(columns)} feature columns."
         )
-    version = record.get("schema_version")
+    version = record.get(_SCHEMA_VERSION_FIELD)
     if isinstance(version, bool) or not isinstance(version, int) or version != _FEATURE_MATRIX_SCHEMA_VERSION:
         raise ValueError(
             f"Feature-matrix metadata {feature_matrices_key}.{matrix_name}.schema_version must equal "
             f"{_FEATURE_MATRIX_SCHEMA_VERSION}, found {version!r}. Compute the matrix again with the function that "
-            f"wrote it, named by its source_kind {record.get('source_kind')!r}, such as hp.tb.add_feature_matrix or "
-            "hp.tb.aggregate_points; Harpy 0.5 wrote version 1."
+            f"wrote it, named by its source_kind {record.get(_SOURCE_KIND_FIELD)!r}, such as "
+            "hp.tb.add_feature_matrix or hp.tb.aggregate_points; Harpy 0.5 wrote version 1."
         )
     _require_nonempty_string(
-        record.get("source_kind"),
+        record.get(_SOURCE_KIND_FIELD),
         path=f"{feature_matrices_key}.{matrix_name}.source_kind",
     )
     return columns

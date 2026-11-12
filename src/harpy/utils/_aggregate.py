@@ -12,8 +12,8 @@ from loguru import logger as log
 from numpy.typing import NDArray
 from scipy import ndimage
 
-from harpy.experimental._moments import MomentAggregator
 from harpy.utils._keys import _CELLSIZE_KEY, _INSTANCE_KEY
+from harpy.utils._moments import MomentAggregator
 from harpy.utils.utils import _da_unique, _get_xp, _to_cupy_dask_array, _to_numpy, _to_numpy_dask_array
 
 
@@ -153,6 +153,7 @@ class RasterAggregator:
         .. code-block:: python
 
             import harpy as hp
+            from harpy.utils._aggregate import RasterAggregator
 
             # Load example dataset
             sdata = hp.datasets.pixie_example()
@@ -167,7 +168,7 @@ class RasterAggregator:
             image_array = image_array[:, None, ...]
             mask_array = mask_array[None, ...]
 
-            aggregator = hp.utils.RasterAggregator(
+            aggregator = RasterAggregator(
                 mask_dask_array=mask_array,
                 image_dask_array=image_array,
             )
@@ -1124,7 +1125,7 @@ def get_instance_size(
     Calculate the size of labeled instances in a mask.
 
     The size of an instance is its number of pixels, counted in one pass over
-    the mask with ``harpy.experimental.MomentAggregator``. It runs on the CPU:
+    the mask with :class:`harpy.utils.MomentAggregator`. It runs on the CPU:
     a CuPy-backed mask is copied to host memory block by block.
 
     Parameters

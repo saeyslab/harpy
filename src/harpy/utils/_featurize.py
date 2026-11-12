@@ -22,9 +22,9 @@ from loguru import logger as log
 from numpy.typing import NDArray
 from sklearn.decomposition import PCA
 
-from harpy.experimental._moments import MomentAggregator
 from harpy.image.segmentation._utils import _rechunk_overlap
 from harpy.utils._keys import _INSTANCE_KEY
+from harpy.utils._moments import MomentAggregator
 from harpy.utils.utils import (
     _da_unique,
     _dummy_embedding,
@@ -1215,8 +1215,8 @@ class Featurizer:
         diameter: int,  # estimated max diameter of cell in y, x
         instance_key: str = _INSTANCE_KEY,
     ) -> pd.DataFrame:
-        """Function calculates mean intensity. Please use the optimized RasterAggregator.aggregate_mean() function."""
-        # this is dummy function to illustrate working of ._extract_instances, please use optimized RasterAggregator
+        """Function calculates mean intensity. Please use the optimized MomentAggregator.aggregate_stats("mean")."""
+        # this is dummy function to illustrate working of ._extract_instances, please use optimized MomentAggregator
         instances_ids, out = self.extract_instances(
             depth=diameter // 2 + 1,
             diameter=diameter,

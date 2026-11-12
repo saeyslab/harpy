@@ -6,7 +6,6 @@ import dask.array as da
 import numpy as np
 import pandas as pd
 
-from harpy.experimental._moments import MomentAggregator
 from harpy.image import get_dataarray
 from harpy.table.canonical_centers._models import (
     CanonicalRegionMetadata,
@@ -20,6 +19,7 @@ from harpy.table.canonical_centers._schema import (
     _canonical_metadata_to_storage,
 )
 from harpy.utils._keys import _INSTANCE_KEY
+from harpy.utils._moments import MomentAggregator
 
 if TYPE_CHECKING:
     from collections.abc import Sequence

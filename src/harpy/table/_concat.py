@@ -19,7 +19,9 @@ from spatialdata.models import TableModel
 
 from harpy._storage._anndata import _decode_anndata_element, _matrix_format
 from harpy.table._metadata import (
+    _FEATURE_MATRICES_KEY,
     _POINT_AGGREGATION_KEY,
+    _REGIONS_FIELD,
     _comparable_metadata,
     _merged_metadata,
     _metadata_difference,
@@ -31,7 +33,6 @@ from harpy.table.canonical_centers._schema import (
     SPATIAL_COORDINATES_KEY,
     _validate_canonical_centers_without_sources,
 )
-from harpy.utils._keys import _FEATURE_MATRICES_KEY
 
 _UNS_MERGE_STRATEGIES = (None, "same", "unique", "first", "only")
 _FORMAT_NAMES = {"dense": "dense", "csr": "CSR", "csc": "CSC", "DataFrame": "a DataFrame", None: "absent"}
@@ -329,11 +330,11 @@ def _parse_table(name: str, adata: AnnData, *, feature_matrices_key: str) -> _Ta
     except ValueError as error:
         raise ValueError(f"{name}: {error}") from error
     for matrix, metadata in feature_matrices_metadata.items():
-        if "regions" in metadata and not isinstance(metadata["regions"], Mapping):
+        if _REGIONS_FIELD in metadata and not isinstance(metadata[_REGIONS_FIELD], Mapping):
             raise ValueError(
                 f"{name}: uns[{feature_matrices_key!r}][{matrix!r}]['regions'] is a "
-                f"{type(metadata['regions']).__name__}, not a mapping. Harpy keeps the metadata of each region there, "
-                "keyed by labels element name; rename the field before concatenating."
+                f"{type(metadata[_REGIONS_FIELD]).__name__}, not a mapping. Harpy keeps the metadata of each region "
+                "there, keyed by labels element name; rename the field before concatenating."
             )
     return _Table(
         name=name,
@@ -478,7 +479,7 @@ def _merged_point_aggregation_metadata(tables: Sequence[_Table], *, region_order
             f"example with del adata.uns[{_POINT_AGGREGATION_KEY!r}], before concatenating."
         )
     for table, metadata in zip(tables, per_table, strict=True):
-        if not isinstance(metadata, Mapping) or not isinstance(metadata.get("regions"), Mapping):
+        if not isinstance(metadata, Mapping) or not isinstance(metadata.get(_REGIONS_FIELD), Mapping):
             raise ValueError(
                 f"{key} of {table.name} must be a mapping with a 'regions' mapping, as hp.tb.aggregate_points "
                 f"writes it. Aggregate the table again, or delete {key} from every table, before concatenating."
@@ -731,7 +732,7 @@ def _log_left_out_regions(
             if matrix not in dropped_feature_matrices:
                 by_path[f"uns[{feature_matrices_key!r}][{matrix!r}]"] = metadata
         left_out = {
-            path: [region for region in metadata.get("regions", {}) if region not in table.regions]
+            path: [region for region in metadata.get(_REGIONS_FIELD, {}) if region not in table.regions]
             for path, metadata in by_path.items()
         }
         left_out = {path: regions for path, regions in left_out.items() if regions}

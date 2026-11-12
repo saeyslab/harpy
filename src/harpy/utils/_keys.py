@@ -11,7 +11,6 @@ _CELLSIZE_KEY = "shapeSize"
 
 _RAW_COUNTS_KEY = "raw_counts"
 _SPATIAL = "spatial"  # key holding coordinates (array) cell/nuclei/bin in adata.obsm
-_FEATURE_MATRICES_KEY = "feature_matrices"
 
 
 # flowsom

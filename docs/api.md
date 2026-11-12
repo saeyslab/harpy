@@ -506,7 +506,7 @@ Utility functions.
 .. autosummary::
     :toctree: generated
 
-    utils.RasterAggregator
+    utils.MomentAggregator
     utils.Featurizer
     utils.kronos_embedding
     utils.bounding_box_query

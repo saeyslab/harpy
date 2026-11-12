@@ -13,12 +13,12 @@ from loguru import logger as log
 from spatialdata import SpatialData
 from spatialdata.models import TableModel
 
-from harpy.experimental._moments import MomentAggregator
 from harpy.image._image import _get_translation, get_dataarray
 from harpy.table._utils import _sanity_check_append_region
 from harpy.table.io._add_table import add_table
 from harpy.utils._deprecation import _renamed_functions
 from harpy.utils._keys import _CELL_INDEX, _CELLSIZE_KEY, _INSTANCE_KEY, _REGION_KEY, _SPATIAL
+from harpy.utils._moments import MomentAggregator
 
 
 def aggregate_image(
@@ -49,7 +49,7 @@ def aggregate_image(
     channel. The statistics in `obs_stats` are added to `.obs`, and the center
     of mass of each instance to `.obsm[spatial_key]`. All of them are computed
     in one pass over the image and the labels, with
-    ``harpy.experimental.MomentAggregator``.
+    :class:`harpy.utils.MomentAggregator`.
 
     The image and labels elements must have the same spatial shape and the
     same translation in `to_coordinate_system`. Misalignments must be resolved
@@ -184,7 +184,7 @@ def aggregate_image(
     See Also
     --------
     harpy.tb.add_feature_matrix : per-instance intensity and morphology features in `.obsm`.
-    harpy.experimental.MomentAggregator : the per-instance statistics used here, from Dask arrays.
+    harpy.utils.MomentAggregator : the per-instance statistics used here, from Dask arrays.
     """
     assert mode in ["sum", "mean"], "'mode' must be either 'sum' or 'mean'."
     if obs_stats is not None:
