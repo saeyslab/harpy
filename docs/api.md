@@ -268,7 +268,7 @@ the contract.
     tb.canonical_centers.CANONICAL_ALGORITHM_VERSION
 ```
 
-### Processing and analysis
+### Building tables
 
 ```{eval-rst}
 
@@ -280,21 +280,32 @@ the contract.
     tb.bin_counts
     tb.add_regionprops
     tb.add_feature_matrix
+    tb.featurize
     tb.validate_table
+    tb.concat
+```
+
+### Instance images
+
+```{eval-rst}
+
+.. autosummary::
+    :toctree: generated
+
     tb.extract_instances
     tb.ZarrIterableInstances
     tb.ZarrDataLoader
-    tb.featurize
-    tb.preprocess_transcriptomics
-    tb.preprocess_proteomics
-    tb.filter_on_size
-    tb.leiden
-    tb.kmeans
+```
+
+### Analysis
+
+```{eval-rst}
+
+.. autosummary::
+    :toctree: generated
+
     tb.score_genes
     tb.score_genes_iter
-    tb.correct_marker_genes
-    tb.cluster_cleanliness
-    tb.nhood_enrichment
     tb.nhood_kmeans
     tb.cluster_intensity
     tb.cluster_intensity_SOM
@@ -495,7 +506,7 @@ Utility functions.
 .. autosummary::
     :toctree: generated
 
-    utils.RasterAggregator
+    utils.MomentAggregator
     utils.Featurizer
     utils.kronos_embedding
     utils.bounding_box_query

@@ -4,7 +4,7 @@ requires = [ "hatchling" ]
 
 [project]
 name = "harpy-analysis"
-version = "0.5.3"
+version = "0.5.4"
 description = "single-cell spatial omics analysis that makes you happy."
 readme = "README.md"
 requires-python = ">=3.12,<3.15"
@@ -62,6 +62,8 @@ dependencies = [
     "spatialdata_io>=0.7.0",
     "spatialdata-plot",
     "flowsom",
+    # compiled kernels of the moment aggregation
+    "numba>=0.64.0",
     # lock example-dataset downloads shared by parallel processes
     "filelock",
     # for debug logging

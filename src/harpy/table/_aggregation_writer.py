@@ -35,9 +35,18 @@ from harpy.table._aggregation_checkpoint import (
 from harpy.table._aggregation_contracts import _COUNT_DTYPE
 from harpy.table._metadata import (
     _AGGREGATE_POINTS_SOURCE_KIND,
+    _COORDINATE_SYSTEM_FIELD,
+    _FEATURE_CLASS_KEY_FIELD,
+    _FEATURE_COLUMNS_FIELD,
+    _FEATURE_KEY_FIELD,
+    _FEATURE_MATRICES_KEY,
     _FEATURE_MATRIX_SCHEMA_VERSION,
     _POINT_AGGREGATION_KEY,
     _POINT_AGGREGATION_SCHEMA_VERSION,
+    _POINTS_ELEMENT_FIELD,
+    _REGIONS_FIELD,
+    _SCHEMA_VERSION_FIELD,
+    _SOURCE_KIND_FIELD,
 )
 from harpy.table._validation import _validate_table_without_canonical_centers
 from harpy.table.canonical_centers import CANONICAL_OBSM_KEY, SPATIAL_COORDINATES_KEY
@@ -46,7 +55,6 @@ from harpy.table.canonical_centers._models import _CanonicalRegionCenters
 from harpy.table.canonical_centers._schema import _validate_canonical_centers
 from harpy.table.io._write import _publish_table_paths
 from harpy.table.io._write_validation import _validate_complete_table
-from harpy.utils._keys import _FEATURE_MATRICES_KEY
 
 
 @dataclass(frozen=True)
@@ -388,16 +396,16 @@ def _aggregation_uns(
     ``Negative``.
     """
     record: dict[str, object] = {
-        "schema_version": _POINT_AGGREGATION_SCHEMA_VERSION,
-        "source_kind": _AGGREGATE_POINTS_SOURCE_KIND,
-        "feature_key": feature_key,
+        _SCHEMA_VERSION_FIELD: _POINT_AGGREGATION_SCHEMA_VERSION,
+        _SOURCE_KIND_FIELD: _AGGREGATE_POINTS_SOURCE_KIND,
+        _FEATURE_KEY_FIELD: feature_key,
     }
     if feature_class_key is not None:
-        record["feature_class_key"] = feature_class_key
-    record["regions"] = {
+        record[_FEATURE_CLASS_KEY_FIELD] = feature_class_key
+    record[_REGIONS_FIELD] = {
         pair.labels_name: {
-            "points_element": pair.points_name,
-            "coordinate_system": pair.coordinate_system,
+            _POINTS_ELEMENT_FIELD: pair.points_name,
+            _COORDINATE_SYSTEM_FIELD: pair.coordinate_system,
         }
         for pair in checkpoint.pairs
     }
@@ -405,9 +413,9 @@ def _aggregation_uns(
     if non_expression_class_matrix_axes:
         uns[_FEATURE_MATRICES_KEY] = {
             key: {
-                "schema_version": _FEATURE_MATRIX_SCHEMA_VERSION,
-                "source_kind": _AGGREGATE_POINTS_SOURCE_KIND,
-                "feature_columns": list(feature_axis),
+                _SCHEMA_VERSION_FIELD: _FEATURE_MATRIX_SCHEMA_VERSION,
+                _SOURCE_KIND_FIELD: _AGGREGATE_POINTS_SOURCE_KIND,
+                _FEATURE_COLUMNS_FIELD: list(feature_axis),
             }
             for key, feature_axis in non_expression_class_matrix_axes
         }

@@ -24,9 +24,15 @@ from spatialdata import SpatialData
 from spatialdata.models import TableModel
 
 from harpy._feature_panels import _require_mapping, _require_nonempty_string
-from harpy.table._metadata import _FEATURE_MATRIX_SCHEMA_VERSION
+from harpy.table._metadata import (
+    _FEATURE_COLUMNS_FIELD,
+    _FEATURE_MATRICES_KEY,
+    _FEATURE_MATRIX_SCHEMA_VERSION,
+    _SCHEMA_VERSION_FIELD,
+    _SOURCE_KIND_FIELD,
+)
 from harpy.table.canonical_centers import CANONICAL_OBSM_KEY, validate_canonical_centers
-from harpy.utils._keys import _FEATURE_MATRICES_KEY, _SPATIAL
+from harpy.utils._keys import _SPATIAL
 
 # .obsm keys that tools read as coordinates; no feature matrix may use them.
 _RESERVED_OBSM_KEYS = frozenset({CANONICAL_OBSM_KEY, _SPATIAL})
@@ -153,46 +159,74 @@ def _validate_table_without_canonical_centers(
 
 
 def _validate_table_annotation(sdata: SpatialData, table_name: str) -> tuple[str, str, tuple[str, ...]] | None:
-    """Validate the annotation, requiring declared and observed region sets to match."""
-    adata = sdata.tables[table_name]
+    """Validate the annotation, requiring declared and observed region sets to match and to exist in ``sdata``."""
+    annotation = _validate_table_annotation_without_sdata(
+        sdata.tables[table_name], name=repr(table_name), path=f"tables.{table_name}"
+    )
+    if annotation is None:
+        return None
+    missing_elements = sorted(region for region in annotation[2] if region not in sdata)
+    if missing_elements:
+        raise ValueError(f"Table {table_name!r} annotation references missing spatial elements: {missing_elements!r}.")
+    return annotation
+
+
+def _validate_table_annotation_without_sdata(
+    adata: AnnData, *, name: str, path: str
+) -> tuple[str, str, tuple[str, ...]] | None:
+    """Validate the annotation of ``adata``: every check except that its regions exist in ``sdata``.
+
+    The region and instance columns exist without missing values, ``(region,
+    instance)`` pairs are unique, and the declared regions equal the observed
+    ones. ``name`` names the table in errors, such as ``'table'``; ``path``
+    starts its metadata paths, such as ``tables.table``.
+
+    Returns
+    -------
+    tuple[str, str, tuple[str, ...]] | None
+        The normalized ``(region_key, instance_key, regions)`` annotation, or
+        ``None`` when the table has no SpatialData annotation.
+    """
     if TableModel.ATTRS_KEY not in adata.uns:
         return None
     annotation = _require_mapping(
         adata.uns.get(TableModel.ATTRS_KEY),
-        path=f"tables.{table_name}.uns.{TableModel.ATTRS_KEY}",
+        path=f"{path}.uns.{TableModel.ATTRS_KEY}",
     )
     region_key = _require_nonempty_string(
         annotation.get(TableModel.REGION_KEY_KEY),
-        path=f"tables.{table_name}.uns.{TableModel.ATTRS_KEY}.{TableModel.REGION_KEY_KEY}",
+        path=f"{path}.uns.{TableModel.ATTRS_KEY}.{TableModel.REGION_KEY_KEY}",
     )
     instance_key = _require_nonempty_string(
         annotation.get(TableModel.INSTANCE_KEY),
-        path=f"tables.{table_name}.uns.{TableModel.ATTRS_KEY}.{TableModel.INSTANCE_KEY}",
+        path=f"{path}.uns.{TableModel.ATTRS_KEY}.{TableModel.INSTANCE_KEY}",
     )
     raw_regions = annotation.get(TableModel.REGION_KEY)
     regions = _metadata_string_sequence(
         [raw_regions] if isinstance(raw_regions, str) else raw_regions,
-        path=f"tables.{table_name}.uns.{TableModel.ATTRS_KEY}.{TableModel.REGION_KEY}",
+        path=f"{path}.uns.{TableModel.ATTRS_KEY}.{TableModel.REGION_KEY}",
     )
 
     for column in (region_key, instance_key):
         if column not in adata.obs:
-            raise ValueError(f"Table {table_name!r} annotation references missing observation column {column!r}.")
+            raise ValueError(f"Table {name} annotation references missing observation column {column!r}.")
     if adata.obs[[region_key, instance_key]].isna().any(axis=None):
-        raise ValueError(f"Table {table_name!r} contains missing region or instance identifiers.")
+        raise ValueError(f"Table {name} contains missing region or instance identifiers.")
     if adata.obs.duplicated(subset=[region_key, instance_key]).any():
-        raise ValueError(f"Table {table_name!r} contains duplicate (region, instance) observation keys.")
+        raise ValueError(f"Table {name} contains duplicate (region, instance) observation keys.")
 
     observed_regions = set(adata.obs[region_key].astype("str").unique())
     undeclared = sorted(observed_regions - set(regions))
     if undeclared:
-        raise ValueError(f"Table {table_name!r} contains regions absent from its annotation: {undeclared!r}.")
+        raise ValueError(f"Table {name} contains regions absent from its annotation: {undeclared!r}.")
     unobserved = sorted(set(regions) - observed_regions)
     if unobserved:
-        raise ValueError(f"Table {table_name!r} declares regions without observations: {unobserved!r}.")
-    missing_elements = sorted(region for region in regions if region not in sdata)
-    if missing_elements:
-        raise ValueError(f"Table {table_name!r} annotation references missing spatial elements: {missing_elements!r}.")
+        left = [region for region in regions if region in observed_regions]
+        raise ValueError(
+            f"Table {name} declares regions without observations: {unobserved!r}. Subsetting rows does not update "
+            f"the declared regions: set adata.uns[{TableModel.ATTRS_KEY!r}][{TableModel.REGION_KEY!r}] to the "
+            f"regions that have rows, {left!r}, or pass them as region to hp.tb.io.add_table."
+        )
     return region_key, instance_key, regions
 
 
@@ -243,7 +277,7 @@ def _validate_feature_matrix_record(
     for a class matrix that :func:`harpy.tb.aggregate_points` writes::
 
         adata.uns["feature_matrices"]["negative"] = {
-            "schema_version": 1,
+            "schema_version": 2,
             "source_kind": "harpy_aggregate_points",
             "feature_columns": ["Negative01", "Negative02", "NegativeZero"],
         }
@@ -270,7 +304,7 @@ def _validate_feature_matrix_record(
             f"Registered feature matrix {matrix_name!r} must have shape (n_obs, n_features), found {matrix.shape}."
         )
     columns = _metadata_string_sequence(
-        record.get("feature_columns"),
+        record.get(_FEATURE_COLUMNS_FIELD),
         path=f"{feature_matrices_key}.{matrix_name}.feature_columns",
     )
     if len(columns) != matrix.shape[1]:
@@ -278,14 +312,16 @@ def _validate_feature_matrix_record(
             f"Registered feature matrix {matrix_name!r} has {matrix.shape[1]} columns but its metadata "
             f"declares {len(columns)} feature columns."
         )
-    version = record.get("schema_version")
+    version = record.get(_SCHEMA_VERSION_FIELD)
     if isinstance(version, bool) or not isinstance(version, int) or version != _FEATURE_MATRIX_SCHEMA_VERSION:
         raise ValueError(
             f"Feature-matrix metadata {feature_matrices_key}.{matrix_name}.schema_version must equal "
-            f"{_FEATURE_MATRIX_SCHEMA_VERSION}, found {version!r}."
+            f"{_FEATURE_MATRIX_SCHEMA_VERSION}, found {version!r}. Compute the matrix again with the function that "
+            f"wrote it, named by its source_kind {record.get(_SOURCE_KIND_FIELD)!r}, such as "
+            "hp.tb.add_feature_matrix or hp.tb.aggregate_points; Harpy 0.5 wrote version 1."
         )
     _require_nonempty_string(
-        record.get("source_kind"),
+        record.get(_SOURCE_KIND_FIELD),
         path=f"{feature_matrices_key}.{matrix_name}.source_kind",
     )
     return columns

@@ -46,8 +46,10 @@ def add_table(
     output_table_name
         Name of the table in ``sdata.tables`` and, when backed, in the store.
     region
-        Names of spatial elements annotated by the resulting table, corresponding
-        to the values in ``adata.obs[region_key]``. Set to ``None`` to create an
+        Names of the spatial elements the resulting table annotates: exactly
+        the values found in ``adata.obs[region_key]``, no more and no fewer.
+        It overwrites ``adata.uns["spatialdata_attrs"]["region"]``, which may
+        be out of date after subsetting rows. Set to ``None`` to create an
         unannotated table, even if ``adata`` is already parsed. This removes
         linkage metadata from the prepared result, not its observation columns.
     instance_key

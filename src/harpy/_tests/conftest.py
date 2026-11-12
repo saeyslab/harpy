@@ -1,6 +1,8 @@
 import os
+import tempfile
 
 import dask
+import numba
 import pytest
 from spatialdata import read_zarr
 from spatialdata.datasets import blobs
@@ -18,15 +20,30 @@ from harpy.table._allocation_intensity import aggregate_image
 
 
 def pytest_configure(config):
-    """Limit Dask's threads in each pytest-xdist worker (``pytest -n auto``).
+    """Limit Dask's threads and separate numba's on-disk cache in each pytest-xdist worker (``pytest -n auto``).
 
     Every worker process runs Dask's threaded scheduler, which by default starts
     one thread per CPU core; with one worker per core that oversubscribes the
     machine. Tests that set a scheduler or ``num_workers`` themselves override
-    this locally. Without pytest-xdist nothing changes.
+    this locally.
+
+    numba updates the cache index of a ``cache=True`` function without a lock.
+    Workers that compile the same function for different dtypes at the same
+    time can leave an entry that points at code compiled for another dtype, and
+    later runs then fail or return wrong values. Each worker therefore gets its
+    own cache directory, which later runs with the same worker id reuse. This
+    covers functions compiled by modules imported after this hook, which
+    includes harpy's kernels. Without pytest-xdist nothing changes.
     """
-    if os.environ.get("PYTEST_XDIST_WORKER") is not None:
+    worker = os.environ.get("PYTEST_XDIST_WORKER")
+    if worker is not None:
         dask.config.set(num_workers=2)
+        base = os.environ.get("NUMBA_CACHE_DIR") or os.path.join(tempfile.gettempdir(), "harpy-numba-cache")
+        cache_dir = os.path.join(base, worker)
+        # numba reads NUMBA_CACHE_DIR when it is imported, which the imports above already did; the
+        # environment variable keeps the setting when numba reloads its configuration before a compile
+        os.environ["NUMBA_CACHE_DIR"] = cache_dir
+        numba.config.CACHE_DIR = cache_dir
 
 
 @pytest.fixture

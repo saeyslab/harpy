@@ -23,8 +23,8 @@ from numpy.typing import NDArray
 from sklearn.decomposition import PCA
 
 from harpy.image.segmentation._utils import _rechunk_overlap
-from harpy.utils._aggregate import RasterAggregator
 from harpy.utils._keys import _INSTANCE_KEY
+from harpy.utils._moments import MomentAggregator
 from harpy.utils.utils import (
     _da_unique,
     _dummy_embedding,
@@ -793,13 +793,14 @@ class Featurizer:
             raise ValueError("Currently we do not allow chunking in z dimension.")
 
         log.info("Calculating center of mass for each instance.")
-        aggregator = RasterAggregator(
-            mask_dask_array=array_mask.squeeze(0),
-            image_dask_array=None,
-            instance_key=_INSTANCE_KEY,
-            run_on_gpu=self._run_on_gpu,
+        # The center of mass is computed on the CPU, so a CuPy-backed mask is copied to host memory block by block.
+        mask_for_center = array_mask.squeeze(0)
+        if is_cupy:
+            mask_for_center = _to_numpy_dask_array(mask_for_center)
+        aggregator = MomentAggregator(mask_dask_array=mask_for_center, instance_key=_INSTANCE_KEY)
+        (center_of_mass,) = aggregator.aggregate_stats(
+            "center_of_mass", index=_to_numpy(self._labels[self._labels != 0])
         )
-        center_of_mass = aggregator.center_of_mass(index=self._labels[self._labels != 0])
         log.info("Finished calculating center of mass for each instance.")
 
         # now want to obtain the chunk id to which each center of mass belongs
@@ -1214,8 +1215,8 @@ class Featurizer:
         diameter: int,  # estimated max diameter of cell in y, x
         instance_key: str = _INSTANCE_KEY,
     ) -> pd.DataFrame:
-        """Function calculates mean intensity. Please use the optimized RasterAggregator.aggregate_mean() function."""
-        # this is dummy function to illustrate working of ._extract_instances, please use optimized RasterAggregator
+        """Function calculates mean intensity. Please use the optimized MomentAggregator.aggregate_stats("mean")."""
+        # this is dummy function to illustrate working of ._extract_instances, please use optimized MomentAggregator
         instances_ids, out = self.extract_instances(
             depth=diameter // 2 + 1,
             diameter=diameter,

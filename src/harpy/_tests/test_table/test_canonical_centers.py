@@ -134,10 +134,12 @@ def test_validate_canonical_centers_rejects_matrix_metadata_asymmetry(missing: s
     table = sdata.tables["table"]
     if missing == "matrix":
         del table.obsm[CANONICAL_OBSM_KEY]
+        present = r"uns\['spatial_coordinates'\]\['spatial_canonical'\]"
     else:
         del table.uns[SPATIAL_COORDINATES_KEY][CANONICAL_OBSM_KEY]
+        present = r"obsm\['spatial_canonical'\]"
 
-    with pytest.raises(ValueError, match="both the matrix"):
+    with pytest.raises(ValueError, match=rf"The table has {present} but not .*; canonical centers need both"):
         validate_canonical_centers(sdata, table_name="table")
 
 
@@ -354,7 +356,7 @@ def test_add_canonical_centers_overwrite_repairs_incomplete_centers(tmp_path) ->
     root = zarr.open_group(store=str(sdata.path), mode="r+", use_consolidated=False)
     del root["tables"]["table"]["uns"][SPATIAL_COORDINATES_KEY][CANONICAL_OBSM_KEY]
     sdata.write_consolidated_metadata()
-    with pytest.raises(ValueError, match="both the matrix"):
+    with pytest.raises(ValueError, match=r"The table has obsm\['spatial_canonical'\] but not .*need both"):
         validate_table(sdata, "table")
 
     add_canonical_centers(sdata, table_name="table", overwrite=True)
@@ -381,7 +383,7 @@ def test_add_canonical_centers_validates_the_table_first(tmp_path, problem, mess
         table.obsm["negative"] = np.ones((table.n_obs, 1))
         table.uns["feature_matrices"] = {
             "negative": {
-                "schema_version": 1,
+                "schema_version": 2,
                 "source_kind": "harpy_aggregate_points",
                 "feature_columns": ["Negative01", "Negative02"],
             }

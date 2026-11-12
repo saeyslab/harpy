@@ -15,7 +15,7 @@ from harpy.image._image import get_dataarray
 from harpy.shape._shape import filter_shapes
 from harpy.table._table import ProcessTable, _require_in_memory_table, _warn_deprecated_wrapper
 from harpy.table.io._add_table import add_table
-from harpy.utils._aggregate import _get_mask_area
+from harpy.utils._aggregate import get_instance_size
 from harpy.utils._keys import _CELLSIZE_KEY, _RAW_COUNTS_KEY
 
 
@@ -338,7 +338,7 @@ class Preprocess(ProcessTable):
             for i, _labels_name in enumerate(self.labels_name):
                 log.info(f"Calculating cell size from provided labels_name '{_labels_name}'")
                 se = get_dataarray(self.sdata, element_name=_labels_name)
-                _shapesize = _get_mask_area(
+                _shapesize = get_instance_size(
                     se.data if se.data.ndim == 3 else se.data[None, ...],
                     instance_key=self.instance_key,
                     instance_size_key=instance_size_key,

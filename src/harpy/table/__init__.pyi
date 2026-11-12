@@ -6,6 +6,7 @@ from ._annotation import cluster_cleanliness, score_genes, score_genes_iter
 from ._canonical_centers import add_canonical_centers
 from ._cluster_intensity import cluster_intensity
 from ._clustering import kmeans, leiden
+from ._concat import concat
 from ._deprecated_add_table import add_table
 from ._enrichment import nhood_enrichment
 from ._preprocess import preprocess_proteomics, preprocess_transcriptomics
@@ -60,5 +61,6 @@ __all__ = [
     "allocate",
     "bin_counts",
     "allocate_intensity",
+    "concat",
     "validate_table",
 ]

@@ -13,19 +13,31 @@ from loguru import logger as log
 from spatialdata import SpatialData
 from spatialdata.models import TableModel
 
-from harpy._storage._anndata import _MissingAnnDataElement, _read_anndata_element
+from harpy._storage._anndata import _matrix_format, _MissingAnnDataElement, _read_anndata_element
 from harpy.image._image import _get_translation, _precondition, get_dataarray
-from harpy.table._metadata import _FEATURE_MATRIX_SCHEMA_VERSION
+from harpy.table._metadata import (
+    _ADD_FEATURE_MATRIX_SOURCE_KIND,
+    _COORDINATE_SYSTEM_FIELD,
+    _FEATURE_COLUMNS_FIELD,
+    _FEATURE_MATRICES_KEY,
+    _FEATURE_MATRIX_SCHEMA_VERSION,
+    _FEATURES_FIELD,
+    _IMAGE_ELEMENT_FIELD,
+    _REGIONS_FIELD,
+    _SCHEMA_VERSION_FIELD,
+    _SOURCE_CHANNELS_FIELD,
+    _SOURCE_KIND_FIELD,
+)
 from harpy.table._regionprops import _calculate_regionprop_features
 from harpy.table._validation import _RESERVED_OBSM_KEYS
+from harpy.table.canonical_centers._models import _format_id_preview
 from harpy.table.io._add_table import add_table
 from harpy.table.io._components import _check_in_memory_versus_storage_axes, _component_update_destination
 from harpy.table.io._components_by_region import add_table_components_by_region
-from harpy.table.io._write_by_region import _matrix_format
 from harpy.table.io._write_validation import _validated_observation_pairs
-from harpy.utils._aggregate import RasterAggregator, _get_mask_area
-from harpy.utils._keys import _CELL_INDEX, _FEATURE_MATRICES_KEY, _INSTANCE_KEY, _REGION_KEY
-from harpy.utils.utils import _da_unique, _make_list
+from harpy.utils._keys import _CELL_INDEX, _INSTANCE_KEY, _REGION_KEY
+from harpy.utils._moments import MomentAggregator
+from harpy.utils.utils import _make_list
 
 _INTENSITY_FEATURES = ("sum", "mean", "var", "min", "max", "kurtosis", "skew")
 _MORPHOLOGY_FEATURES = (
@@ -43,7 +55,10 @@ _MORPHOLOGY_FEATURES = (
     "centroid_dif",
 )
 _UNSUPPORTED_3D_MORPHOLOGY_FEATURES = ("eccentricity", "perimeter", "perim_square_over_area")
-_SOURCE_KIND = "harpy_add_feature_matrix"
+# Features that one MomentAggregator pass over the labels (and the image) gives, with the
+# statistic behind each: the intensity features per channel, and the area as the pixel count.
+# The other morphology features come from regionprops, with the labels in memory.
+_AGGREGATED_FEATURES = {**{feature: feature for feature in _INTENSITY_FEATURES}, "area": "count"}
 
 
 @dataclass(frozen=True)
@@ -70,7 +85,6 @@ def add_feature_matrix(
     instance_key: str = _INSTANCE_KEY,
     feature_matrices_key: str = _FEATURE_MATRICES_KEY,
     chunks: str | int | tuple[int, ...] | None = None,
-    run_on_gpu: bool = False,
 ) -> SpatialData:
     """
     Compute per-instance feature matrices from labels and optional image data.
@@ -163,9 +177,6 @@ def add_feature_matrix(
         Optional chunk specification used to rechunk image and labels arrays
         during feature extraction. Rechunking on disk ahead of time is often
         more efficient.
-    run_on_gpu
-        Whether to use GPU-backed execution where supported. If GPU execution is
-        requested but CuPy is not available, Harpy falls back to CPU execution.
 
     Returns
     -------
@@ -179,7 +190,12 @@ def add_feature_matrix(
 
     In both storage modes, existing tables require valid SpatialData annotation
     with unique region/instance pairs. Selected labels elements must exist in
-    ``sdata.labels`` and have observations in the target table.
+    ``sdata.labels`` and have observations in the target table. Every
+    observation of a selected labels element must have an instance id that
+    occurs in that element; otherwise a ``ValueError`` names the rows, rather
+    than giving them NaN features. Instances of the labels without an
+    observation in the table are left out. Features of instances that do occur
+    are stored as calculated, NaN included.
 
     If ``sdata`` is backed by a Zarr store, existing-table updates publish only
     the feature matrix and its metadata, without reading or rewriting ``.X``.
@@ -279,12 +295,9 @@ def add_feature_matrix(
                 f"Table element '{output_table_name}' already exists in 'sdata.tables'. "
                 "Set 'overwrite_output_table=True' to replace it."
             )
-        adata = _prepare_feature_table(
-            sdata,
-            labels_name=labels_names,
-            region_key=region_key,
-            instance_key=instance_key,
-        )
+        # The rows of the new table are the instances found while calculating the features, so
+        # the table is built after the calculation and the labels are not read for it separately.
+        adata = None
         target_table_name = output_table_name
         existing_matrix = None
         existing_metadata = None
@@ -349,8 +362,13 @@ def add_feature_matrix(
             instance_key=instance_key,
             region_key=region_key,
             chunks=chunks,
-            run_on_gpu=run_on_gpu,
         )
+        if table_name is None and pair_frame.empty:
+            # A new table declares every labels element as a region, and a region needs rows.
+            raise ValueError(
+                f"Labels element {pair.labels_name!r} contains no instances, only background (label 0), so the new "
+                f"table {output_table_name!r} would have no rows for it. Remove it from 'labels_name'."
+            )
         pair_frames.append(pair_frame)
         if pair_channels is not None:
             # Harpy does not support heterogeneous channels across samples, so every
@@ -382,9 +400,28 @@ def add_feature_matrix(
             f"alignment ambiguous. Examples: {duplicates.to_dict(orient='records')}"
         )
 
+    if adata is None:
+        adata = _new_feature_table(
+            computed_features.loc[:, [region_key, instance_key]],
+            labels_names=labels_names,
+            region_key=region_key,
+            instance_key=instance_key,
+        )
+
     selected_mask = adata.obs[region_key].isin(labels_names).to_numpy()
     selected_keys = adata.obs.loc[selected_mask, [region_key, instance_key]]
-    aligned = computed_features.set_index([region_key, instance_key]).reindex(pd.MultiIndex.from_frame(selected_keys))
+    # Values go to table rows by (region, instance) key, not by row order.
+    computed_by_key = computed_features.set_index([region_key, instance_key])
+    table_keys = pd.MultiIndex.from_frame(selected_keys)
+    _check_table_rows_in_labels(
+        selected_keys,
+        found=computed_by_key.index.get_indexer(table_keys) != -1,
+        table_name=target_table_name,
+        labels_names=labels_names,
+        region_key=region_key,
+        instance_key=instance_key,
+    )
+    aligned = computed_by_key.reindex(table_keys)
     aligned_values = aligned.loc[:, columns].to_numpy(dtype=np.float64)
 
     if existing_matrix is not None:
@@ -399,27 +436,22 @@ def add_feature_matrix(
         if not np.can_cast(aligned_values.dtype, existing_matrix.dtype, casting="safe"):
             raise ValueError(f"Calculated features cannot be safely cast to stored dtype {existing_matrix.dtype}.")
 
-    # Per-pair fields are always stored as lists (one entry per labels/image pair) so
-    # the metadata schema does not depend on how many pairs were requested.
+    # The metadata of each labels region goes under "regions", keyed by the labels element,
+    # so that regional updates and hp.tb.concat merge it by region.
     metadata = {
-        "feature_columns": list(columns),
-        "schema_version": _FEATURE_MATRIX_SCHEMA_VERSION,
-        "backend": "numpy",
-        "source_kind": _SOURCE_KIND,
-        "dtype": str(aligned_values.dtype if existing_matrix is None else existing_matrix.dtype),
-        "source_label": [pair.labels_name for pair in pair_specs],
-        "source_image": [pair.image_name for pair in pair_specs],
-        "source_channels": source_channels,
-        "coordinate_system": [pair.coordinate_system for pair in pair_specs],
-        "features": list(requested_features),
+        _FEATURE_COLUMNS_FIELD: list(columns),
+        _SCHEMA_VERSION_FIELD: _FEATURE_MATRIX_SCHEMA_VERSION,
+        _SOURCE_KIND_FIELD: _ADD_FEATURE_MATRIX_SOURCE_KIND,
+        _SOURCE_CHANNELS_FIELD: source_channels,
+        _FEATURES_FIELD: list(requested_features),
+        _REGIONS_FIELD: {
+            pair.labels_name: {_IMAGE_ELEMENT_FIELD: pair.image_name, _COORDINATE_SYSTEM_FIELD: pair.coordinate_system}
+            for pair in pair_specs
+        },
     }
 
     if existing_matrix is not None:
-        metadata = _merge_feature_matrix_metadata(
-            existing_metadata,
-            metadata,
-            region_order=adata.obs[region_key].unique().tolist(),
-        )
+        metadata = _merge_feature_matrix_metadata(existing_metadata, metadata)
 
     if table_name is None:
         # Build the complete result before publishing anything: calculation or
@@ -528,57 +560,30 @@ def _existing_feature_matrix(
     return matrix, metadata
 
 
-def _merge_feature_matrix_metadata(previous: object, current: dict, *, region_order: list[str]) -> dict:
-    """Keep source descriptions for retained regions without relabeling existing feature columns."""
+def _merge_feature_matrix_metadata(previous: object, current: dict) -> dict:
+    """Merge the metadata of an update into the existing one, keeping the regions the update does not compute.
+
+    The feature columns are not relabeled.
+    """
     if (
         not isinstance(previous, Mapping)
-        or previous.get("schema_version") != _FEATURE_MATRIX_SCHEMA_VERSION
-        or previous.get("source_kind") != _SOURCE_KIND
-        or not np.array_equal(previous.get("feature_columns"), current["feature_columns"])
+        or previous.get(_SCHEMA_VERSION_FIELD) != _FEATURE_MATRIX_SCHEMA_VERSION
+        or previous.get(_SOURCE_KIND_FIELD) != _ADD_FEATURE_MATRIX_SOURCE_KIND
+        or not isinstance(previous.get(_REGIONS_FIELD), Mapping)
+        or not np.array_equal(previous.get(_FEATURE_COLUMNS_FIELD), current[_FEATURE_COLUMNS_FIELD])
+        or not np.array_equal(previous.get(_SOURCE_CHANNELS_FIELD), current[_SOURCE_CHANNELS_FIELD])
     ):
         raise ValueError(
-            "Existing feature metadata must have a compatible schema and identical feature columns in order."
+            "Existing feature metadata must have a compatible schema, as add_feature_matrix writes it with schema "
+            f"version {_FEATURE_MATRIX_SCHEMA_VERSION}, and identical feature columns and source channels in order. "
+            "To replace the matrix, remove it and its metadata with hp.tb.io.remove_table_components, then compute "
+            "it again for every region."
         )
-    if not np.array_equal(previous.get("source_channels"), current["source_channels"]):
-        raise ValueError("Existing and calculated feature matrices must use the same source channels in order.")
-
-    fields = ("source_label", "source_image", "coordinate_system")
-    previous_sources = []
-    for field in fields:
-        values = previous.get(field)
-        if not isinstance(values, (list, tuple, np.ndarray)) or np.ndim(values) != 1:
-            raise ValueError(f"Existing feature metadata requires a one-dimensional {field!r} sequence.")
-        previous_sources.append(list(values))
-    labels, images, coordinate_systems = previous_sources
-    if (
-        len(labels) != len(images)
-        or len(labels) != len(coordinate_systems)
-        or any(not isinstance(label, str) for label in labels)
-        or len(set(labels)) != len(labels)
-        or any(image is not None and not isinstance(image, str) for image in images)
-        or any(not isinstance(system, str) for system in coordinate_systems)
-    ):
-        raise ValueError(
-            "Existing feature metadata must contain one source image and coordinate system per unique label."
-        )
-
-    # Index the existing source descriptions by region.
-    sources = {}
-    for label, image, coordinate_system in zip(labels, images, coordinate_systems, strict=True):
-        sources[label] = (image, coordinate_system)
-
-    # Replace sources for the requested regions, retaining the others.
-    for label, image, coordinate_system in zip(
-        current["source_label"], current["source_image"], current["coordinate_system"], strict=True
-    ):
-        sources[label] = (image, coordinate_system)
-
-    # Store parallel lists in the table's region order.
-    merged = {**deepcopy(previous), **current}
-    merged["source_label"] = [label for label in region_order if label in sources]
-    merged["source_image"] = [sources[label][0] for label in merged["source_label"]]
-    merged["coordinate_system"] = [sources[label][1] for label in merged["source_label"]]
-    return merged
+    return {
+        **deepcopy(dict(previous)),
+        **current,
+        _REGIONS_FIELD: {**deepcopy(dict(previous[_REGIONS_FIELD])), **current[_REGIONS_FIELD]},
+    }
 
 
 def _normalize_requested_features(features: tuple[str, ...] | list[str]) -> list[str]:
@@ -655,47 +660,70 @@ def _broadcast_parameter(
     )
 
 
-def _prepare_feature_table(
-    sdata: SpatialData,
-    labels_name: Sequence[str],
+def _check_table_rows_in_labels(
+    table_keys: pd.DataFrame,
+    *,
+    found: np.ndarray,
+    table_name: str,
+    labels_names: Sequence[str],
+    region_key: str,
+    instance_key: str,
+) -> None:
+    """Raise if a table row of a selected labels element has an instance id that does not occur in that element.
+
+    ``found`` tells, per row of ``table_keys``, whether features were calculated for its
+    ``(region, instance)`` pair. Without this check such a row would silently get NaN features.
+
+    It checks only that every row gets calculated features, not their values: a feature of an
+    instance that does occur can still be NaN, for example ``major_minor_axis_ratio`` of an
+    instance one pixel wide, or an intensity feature of an image with NaN pixels. Those values
+    are stored as calculated.
+    """
+    if found.all():
+        return
+    missing = table_keys.loc[~found]
+    problems = []
+    for labels_name in labels_names:
+        instance_ids = missing.loc[missing[region_key] == labels_name, instance_key].to_numpy()
+        if instance_ids.size:
+            problems.append(
+                f"{instance_ids.size} rows of table {table_name!r} have instance IDs that do not occur in labels "
+                f"element {labels_name!r} (e.g. {_format_id_preview(instance_ids)})"
+            )
+    raise ValueError(
+        "; ".join(problems) + ". The labels and the table are out of sync: remove these rows from the table, or "
+        "calculate the features from the labels element the table was made from."
+    )
+
+
+def _new_feature_table(
+    identities: pd.DataFrame,
+    labels_names: Sequence[str],
     region_key: str,
     instance_key: str,
 ) -> AnnData:
-    """Prepare observation identities without attaching or publishing a table."""
-    obs_frames: list[pd.DataFrame] = []
+    """Build the observations of a new table from the calculated identities, without attaching or publishing it.
+
+    ``identities`` holds the ``(region_key, instance_key)`` pair of every calculated row: the
+    instances of each labels element, background excluded, in the order of ``labels_names``
+    and with ascending instance ids within an element.
+    """
     uuid_value = str(uuid.uuid4())[:8]
-    labels_names = list(labels_name)
-
-    for labels in labels_names:
-        data = get_dataarray(sdata, element_name=labels).data
-        instance_ids = np.asarray(_da_unique(data, run_on_gpu=False))
-        instance_ids = instance_ids[instance_ids != 0].astype(int, copy=False)
-
-        obs = pd.DataFrame(
-            {
-                instance_key: instance_ids,
-                region_key: labels,
-            }
-        )
-        obs.index = pd.Index(
-            [f"{instance_id}_{labels}_{uuid_value}" for instance_id in instance_ids],
-            name=_CELL_INDEX,
-        )
-        obs_frames.append(obs)
-
-    if obs_frames:
-        table_obs = pd.concat(obs_frames, axis=0)
-    else:
-        # Defensive fallback: the public path should always provide at least one labels element,
-        # but keep this helper able to construct an empty .obs table if it is called with none.
-        table_obs = pd.DataFrame(columns=[instance_key, region_key])
-        table_obs.index = pd.Index([], name=_CELL_INDEX)
-
-    table_obs[region_key] = pd.Categorical(table_obs[region_key], categories=list(labels_names))
-    adata = AnnData(obs=table_obs)
+    instance_ids = identities[instance_key].to_numpy(dtype=int)
+    regions = identities[region_key].to_numpy()
+    table_obs = pd.DataFrame(
+        {
+            instance_key: instance_ids,
+            region_key: pd.Categorical(regions, categories=list(labels_names)),
+        }
+    )
+    table_obs.index = pd.Index(
+        [f"{instance_id}_{region}_{uuid_value}" for instance_id, region in zip(instance_ids, regions, strict=True)],
+        name=_CELL_INDEX,
+    )
 
     return TableModel.parse(
-        adata,
+        AnnData(obs=table_obs),
         region=list(labels_names),
         instance_key=instance_key,
         region_key=region_key,
@@ -711,11 +739,14 @@ def _compute_pair_feature_frame(
     instance_key: str,
     region_key: str,
     chunks: str | int | tuple[int, ...] | None,
-    run_on_gpu: bool,
 ) -> tuple[pd.DataFrame, list[str], list[str] | None]:
     labels = get_dataarray(sdata, element_name=pair.labels_name)
     _ = _get_translation(labels, to_coordinate_system=pair.coordinate_system)
     source_labels_ndim = labels.data.ndim
+    if source_labels_ndim == 3:
+        unsupported = [feature for feature in morphology_features if feature in _UNSUPPORTED_3D_MORPHOLOGY_FEATURES]
+        if unsupported:
+            raise ValueError(f"Morphology feature(s) {unsupported} are not supported for 3D labels data.")
 
     feature_frames: list[pd.DataFrame] = []
     ordered_columns: list[str] = []
@@ -735,45 +766,48 @@ def _compute_pair_feature_frame(
         ordered_columns.extend(_ordered_intensity_columns(intensity_features, channel_names))
     else:
         labels_array = labels.data
+    ordered_columns.extend(morphology_features)
 
-    mask_for_instances = labels_array if labels_array.ndim == 3 else labels_array[None, ...]
-    # Keep shared instance ids on CPU; downstream intensity/area helpers move them
-    # to the appropriate backend internally when needed.
-    instance_ids = np.asarray(_da_unique(mask_for_instances, run_on_gpu=False))
-    instance_ids = instance_ids[instance_ids != 0].astype(int, copy=False)
+    # The features split by how they are computed: one MomentAggregator pass gives the intensity
+    # features and the area, regionprops the other morphology features. Every frame holds every
+    # instance of the labels, background excluded: the instance ids come from the calculation
+    # itself, not from a separate pass over the labels.
+    aggregated_features = [
+        feature for feature in (*intensity_features, *morphology_features) if feature in _AGGREGATED_FEATURES
+    ]
+    regionprops_features = [feature for feature in morphology_features if feature not in _AGGREGATED_FEATURES]
 
-    if intensity_features:
-        intensity_frame = _compute_intensity_feature_frame(
-            image_array=image_array[channel_indices],
-            labels_array=labels_array,
-            intensity_features=intensity_features,
-            channel_names=channel_names,
-            instance_key=instance_key,
-            instance_ids=instance_ids,
-            run_on_gpu=run_on_gpu,
+    if aggregated_features:
+        feature_frames.append(
+            _compute_aggregated_feature_frame(
+                labels_array=labels_array if labels_array.ndim == 3 else labels_array[None, ...],
+                image_array=image_array[channel_indices] if intensity_features else None,
+                features=aggregated_features,
+                channel_names=channel_names if intensity_features else [],
+                instance_key=instance_key,
+            )
         )
-        feature_frames.append(intensity_frame)
 
-    if morphology_features:
-        # 2D intensity extraction adds a singleton z-axis for RasterAggregator.
+    if regionprops_features:
+        # 2D intensity extraction adds a singleton z-axis for the aggregator.
         # Remove it again before calling skimage regionprops so 2D-only features
         # such as eccentricity still work.
-        morphology_labels_array = (
+        regionprops_labels_array = (
             labels_array[0] if source_labels_ndim == 2 and labels_array.ndim == 3 else labels_array
         )
-        morphology_frame = _compute_morphology_feature_frame(
-            labels_array=morphology_labels_array,
-            morphology_features=morphology_features,
-            instance_key=instance_key,
-            instance_ids=instance_ids,
-            run_on_gpu=run_on_gpu,
+        feature_frames.append(
+            _compute_regionprops_feature_frame(
+                labels_array=regionprops_labels_array,
+                features=regionprops_features,
+                instance_key=instance_key,
+            )
         )
-        feature_frames.append(morphology_frame)
-        ordered_columns.extend(morphology_features)
 
     pair_frame = feature_frames[0]
     for frame in feature_frames[1:]:
         pair_frame = pair_frame.merge(frame, how="outer", on=instance_key)
+    # a new table takes its rows in this order: ascending instance ids within a labels element
+    pair_frame = pair_frame.sort_values(instance_key, ignore_index=True)
 
     pair_frame[region_key] = pair.labels_name
     pair_frame = pair_frame.reindex(columns=[region_key, instance_key, *ordered_columns])
@@ -866,74 +900,66 @@ def _prepare_raster_arrays(
     if labels_chunks is not None:
         prepared_labels = prepared_labels.rechunk(labels_chunks)
 
-    # RasterAggregator requires the labels and the image to share spatial (z, y, x) chunks.
+    # MomentAggregator requires the labels and the image to share spatial (z, y, x) chunks.
     # The labels and image already share spatial shape (validated by _precondition), so align
-    # the (cheaper) single-band labels onto the image's spatial chunking when they differ.
-    if prepared_labels.chunksize != prepared_image.chunksize[1:]:
+    # the (cheaper) single-band labels onto the image's spatial chunks when they differ.
+    # Compare the chunks, not the chunk sizes: a crop off the chunk grid has the same chunk
+    # size with other chunk boundaries.
+    if prepared_labels.chunks != prepared_image.chunks[1:]:
         log.info(
-            "Image and labels have different chunk sizes; rechunking labels to match "
+            "Image and labels have different chunks; rechunking labels to match "
             f"the image's spatial chunks {prepared_image.chunksize[1:]} for aggregation."
         )
-        prepared_labels = prepared_labels.rechunk(prepared_image.chunksize[1:])
+        prepared_labels = prepared_labels.rechunk(prepared_image.chunks[1:])
 
     return prepared_image, prepared_labels
 
 
-def _compute_intensity_feature_frame(
-    image_array,
+def _compute_aggregated_feature_frame(
     labels_array,
-    intensity_features: Sequence[str],
+    image_array,
+    features: Sequence[str],
     channel_names: Sequence[str],
     instance_key: str,
-    instance_ids: np.ndarray,
-    run_on_gpu: bool,
 ) -> pd.DataFrame:
-    result = pd.DataFrame({instance_key: instance_ids})
+    """Features of every instance that one pass of :class:`MomentAggregator` gives, see ``_AGGREGATED_FEATURES``.
 
-    aggregator = RasterAggregator(
+    Intensity features get a column per channel, ``area`` a single column. ``image_array`` is
+    `None` when only the area is requested: the pass then reads only the labels. Returns a row
+    per instance, background excluded, in ascending order.
+    """
+    aggregator = MomentAggregator(
         mask_dask_array=labels_array,
         image_dask_array=image_array,
         instance_key=instance_key,
-        run_on_gpu=run_on_gpu,
     )
+    stats_funcs = tuple(_AGGREGATED_FEATURES[feature] for feature in features)
+    # without an index: a row for every label of the mask, in ascending order
+    stats_frames = [
+        _without_background(frame, instance_key) for frame in aggregator.aggregate_stats(stats_funcs=stats_funcs)
+    ]
 
-    aggregated_features = [feature for feature in intensity_features if feature not in {"max", "min"}]
-    renamed_frames: dict[str, pd.DataFrame] = {}
-    if aggregated_features:
-        stats_funcs = tuple(aggregated_features)
-        stats_frames = aggregator.aggregate_stats(stats_funcs=stats_funcs, index=instance_ids)
-        for feature, frame in zip(stats_funcs, stats_frames, strict=True):
-            renamed_frames[feature] = _rename_intensity_columns(frame, feature, channel_names, instance_key)
+    result = stats_frames[0].loc[:, [instance_key]]
+    for feature, frame in zip(features, stats_frames, strict=True):
+        if feature == "area":
+            renamed = frame.rename(columns={0: "area"})
+        else:
+            renamed = _rename_intensity_columns(frame, feature, channel_names, instance_key)
+        result = result.merge(renamed, how="outer", on=instance_key)
 
-    if "max" in intensity_features:
-        frame = aggregator.aggregate_max(index=instance_ids)
-        renamed_frames["max"] = _rename_intensity_columns(
-            frame,
-            "max",
-            channel_names,
-            instance_key,
-        )
-    if "min" in intensity_features:
-        frame = aggregator.aggregate_min(index=instance_ids)
-        renamed_frames["min"] = _rename_intensity_columns(
-            frame,
-            "min",
-            channel_names,
-            instance_key,
-        )
-
-    for feature in intensity_features:
-        result = result.merge(renamed_frames[feature], how="outer", on=instance_key)
-
-    # sanity checks
+    # sanity check
     assert result[instance_key].is_unique, (
-        f"Expected '{instance_key}' to remain unique after merging intensity features."
-    )
-    assert set(result[instance_key].to_numpy()) == set(instance_ids.tolist()), (
-        f"Expected merged intensity result to contain exactly the provided '{instance_key}' values."
+        f"Expected '{instance_key}' to remain unique after merging aggregated features."
     )
 
     return result
+
+
+def _without_background(frame: pd.DataFrame, instance_key: str) -> pd.DataFrame:
+    """Drop the background row (label 0) and store the instance ids as ``int``."""
+    frame = frame.loc[frame[instance_key] != 0].reset_index(drop=True)
+    frame[instance_key] = frame[instance_key].astype(int, copy=False)
+    return frame
 
 
 def _rename_intensity_columns(
@@ -953,50 +979,23 @@ def _ordered_intensity_columns(intensity_features: Sequence[str], channel_names:
     return [f"{feature}__{channel_name}" for feature in intensity_features for channel_name in channel_names]
 
 
-def _compute_morphology_feature_frame(
+def _compute_regionprops_feature_frame(
     labels_array,
-    morphology_features: Sequence[str],
+    features: Sequence[str],
     instance_key: str,
-    instance_ids: np.ndarray,
-    run_on_gpu: bool,
 ) -> pd.DataFrame:
-    if labels_array.ndim == 3:
-        unsupported = [feature for feature in morphology_features if feature in _UNSUPPORTED_3D_MORPHOLOGY_FEATURES]
-        if unsupported:
-            raise ValueError(f"Morphology feature(s) {unsupported} are not supported for 3D labels data.")
+    """Morphology features of every instance from :func:`skimage.measure.regionprops`, with the labels in memory.
 
-    result_frames: list[pd.DataFrame] = []
-
-    if "area" in morphology_features:
-        mask_for_area = labels_array if labels_array.ndim == 3 else labels_array[None, ...]
-        # Only the area fast path honors run_on_gpu; skimage regionprops remains CPU-only.
-        area_frame = _get_mask_area(
-            mask_for_area,
-            index=instance_ids,
-            instance_key=instance_key,
-            instance_size_key="area",
-            run_on_gpu=run_on_gpu,
-        )
-        area_frame[instance_key] = area_frame[instance_key].astype(int, copy=False)
-        result_frames.append(area_frame.loc[:, [instance_key, "area"]])
-
-    other_morphology_features = [feature for feature in morphology_features if feature != "area"]
-    if other_morphology_features:
-        masks = labels_array.compute()
-        frame = _calculate_regionprop_features(
-            masks=masks,
-            properties=tuple(other_morphology_features),
-            instance_key=instance_key,
-        )
-        other_frame = frame.loc[:, [instance_key, *other_morphology_features]].copy()
-        other_frame[instance_key] = other_frame[instance_key].astype(int, copy=False)
-        result_frames.append(other_frame)
-
-    result = result_frames[0]
-    for frame in result_frames[1:]:
-        result = result.merge(frame, how="outer", on=instance_key)
-
-    return result.loc[:, [instance_key, *morphology_features]]
+    Returns a row per instance, background excluded, in ascending order.
+    """
+    frame = _calculate_regionprop_features(
+        masks=labels_array.compute(),
+        properties=tuple(features),
+        instance_key=instance_key,
+    )
+    result = frame.loc[:, [instance_key, *features]].copy()
+    result[instance_key] = result[instance_key].astype(int, copy=False)
+    return result
 
 
 def _format_channel_name(channel_name: object, index: int) -> str:

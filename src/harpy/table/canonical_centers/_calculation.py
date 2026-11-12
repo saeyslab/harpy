@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import warnings
 from typing import TYPE_CHECKING
 
 import dask.array as da
@@ -19,8 +18,8 @@ from harpy.table.canonical_centers._schema import (
     _build_region_metadata,
     _canonical_metadata_to_storage,
 )
-from harpy.utils import RasterAggregator
 from harpy.utils._keys import _INSTANCE_KEY
+from harpy.utils._moments import MomentAggregator
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -43,7 +42,7 @@ def _calculate_canonical_centers(sdata: SpatialData, binding: _CanonicalRegionBi
     if metadata.dims == ("y", "x"):
         mask = mask[None, ...]
     _validate_instance_ids_fit_labels_dtype(binding, mask.dtype)
-    centers = _calculate_centers_with_raster_aggregator(mask, binding)
+    centers = _calculate_centers(mask, binding)
     return _CanonicalRegionCenters(binding=binding, metadata=metadata, centers=centers)
 
 
@@ -85,38 +84,28 @@ def _validate_instance_ids_fit_labels_dtype(binding: _CanonicalRegionBinding, la
         )
 
 
-def _calculate_centers_with_raster_aggregator(
+def _calculate_centers(
     labels: da.Array,
     binding: _CanonicalRegionBinding,
 ) -> np.ndarray:
-    aggregator = RasterAggregator(
-        mask_dask_array=labels,
-        image_dask_array=None,
-        instance_key=_INSTANCE_KEY,
-        run_on_gpu=False,
-    )
-    with warnings.catch_warnings():
-        warnings.filterwarnings(
-            "ignore",
-            message="invalid value encountered in divide",
-            category=RuntimeWarning,
-        )
-        result = aggregator.center_of_mass(index=binding.instance_ids)
+    aggregator = MomentAggregator(mask_dask_array=labels, instance_key=_INSTANCE_KEY)
+    # an instance ID that does not occur in the labels gets a NaN center; the check below raises for it
+    (result,) = aggregator.aggregate_stats("center_of_mass", index=binding.instance_ids)
     if not isinstance(result, pd.DataFrame):
-        raise ValueError("RasterAggregator center_of_mass must return a pandas DataFrame.")
+        raise ValueError("The center-of-mass aggregation must return a pandas DataFrame.")
     coordinate_columns = [0, 1, 2]
     expected_columns = [*coordinate_columns, _INSTANCE_KEY]
     if result.columns.tolist() != expected_columns:
-        raise ValueError("RasterAggregator center_of_mass must return z, y, x, and instance ID columns in that order.")
+        raise ValueError("The center-of-mass aggregation must return z, y, x, and instance ID columns in that order.")
 
     output_ids = result[_INSTANCE_KEY].to_numpy()
     if output_ids.dtype != binding.instance_ids.dtype or not np.array_equal(output_ids, binding.instance_ids):
-        raise ValueError("RasterAggregator center_of_mass instance IDs must match the requested IDs in order.")
+        raise ValueError("The center-of-mass aggregation must return the requested instance IDs in order.")
 
     try:
         centers = result[coordinate_columns].to_numpy(dtype=np.float64, copy=True)
     except (TypeError, ValueError) as exc:
-        raise ValueError("RasterAggregator center_of_mass coordinates must be numeric.") from exc
+        raise ValueError("The center-of-mass aggregation must return numeric coordinates.") from exc
     finite = np.isfinite(centers).all(axis=1)
     if not finite.all():
         missing_ids = binding.instance_ids[~finite]

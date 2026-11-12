@@ -269,7 +269,9 @@ def score_genes_iter(
         cells in `sdata.tables[table_name]` linked to other `labels_name` (via the region key), will be removed from `sdata.tables[table_name]`.
         If a list of labels elements is provided, they will therefore be scored together (e.g. multiple samples).
     table_name
-        The table element in `sdata` on which to perform annotation on. We assume the data is already preprocessed by e.g. :func:`~harpy.tb.preprocess_transcriptomics`.
+        The table element in `sdata` on which to perform annotation on. We assume the data is already preprocessed,
+        for example normalized with :func:`harpy.tb.pp.normalize_by_size` or :func:`scanpy.pp.normalize_total`, and
+        log-transformed with :func:`scanpy.pp.log1p`.
         Features should all have approximately same variance.
     output_table_name
         The output table element in `sdata` to which table element with results of annotation will be written.

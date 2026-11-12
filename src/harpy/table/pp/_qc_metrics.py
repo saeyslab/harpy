@@ -20,8 +20,8 @@ from harpy.qc._summary_schema import (
     _statistic_name,
 )
 from harpy.qc.table._summarize_table import TableSummary, summarize_table
+from harpy.table._metadata import _FEATURE_MATRICES_KEY
 from harpy.table._utils import _spatialdata_annotation
-from harpy.utils._keys import _FEATURE_MATRICES_KEY
 
 # The columns of TableSummary.per_feature written to .var, in this order, each followed by the label of the
 # class of X or the layer read.

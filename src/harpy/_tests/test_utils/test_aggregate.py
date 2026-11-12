@@ -1,12 +1,13 @@
 import dask.array as da
 import numpy as np
+import pandas as pd
 import pytest
 from scipy import ndimage
 from scipy.stats import kurtosis, skew
 from xrspatial import zonal_stats
 
 from harpy.utils import get_instance_size
-from harpy.utils._aggregate import RasterAggregator, _get_mask_area
+from harpy.utils._aggregate import RasterAggregator
 from harpy.utils._keys import _CELLSIZE_KEY, _INSTANCE_KEY
 
 
@@ -449,18 +450,22 @@ def test_aggregate_var_3D(sdata):
     assert np.allclose(df_var[2].values, scipy_var, rtol=0, atol=1e-5)
 
 
-def test_get_mask_area(sdata):
+def test_get_instance_size(sdata):
     se_labels = sdata["blobs_labels"]
     mask = se_labels.data[None, ...].rechunk(512)
-    df = _get_mask_area(mask, instance_size_key=_CELLSIZE_KEY)
+    df = get_instance_size(mask, instance_size_key=_CELLSIZE_KEY)
 
     mask_compute = mask.compute()
-    area = ndimage.sum_labels(input=np.ones(mask_compute.shape), labels=mask_compute, index=np.unique(mask_compute))
+    index = np.unique(mask_compute)
+    area = ndimage.sum_labels(input=np.ones(mask_compute.shape), labels=mask_compute, index=index)
 
+    assert list(df.columns) == [_INSTANCE_KEY, _CELLSIZE_KEY]
+    assert df[_CELLSIZE_KEY].dtype == np.float32
+    assert np.array_equal(df[_INSTANCE_KEY].values, index)
     assert np.array_equal(df[_CELLSIZE_KEY].values, area)
 
 
-def test_get_mask_area_subset(sdata):
+def test_get_instance_size_subset(sdata):
     se_labels = sdata["blobs_labels"]
     mask = se_labels.data[None, ...].rechunk(512)
     mask_compute = mask.compute()
@@ -471,21 +476,22 @@ def test_get_mask_area_subset(sdata):
         index[2],
         index.max() + 10,
     ]  # pick subset + an index not in mask. It will return 0 for this index.
-    df = _get_mask_area(mask, index=subset_index, instance_size_key=_CELLSIZE_KEY)
+    df = get_instance_size(mask, index=subset_index, instance_size_key=_CELLSIZE_KEY)
 
     area = ndimage.sum_labels(input=np.ones(mask_compute.shape), labels=mask_compute, index=subset_index)
 
+    assert np.array_equal(df[_INSTANCE_KEY].values, subset_index)
     assert np.array_equal(df[_CELLSIZE_KEY].values, area)
 
 
-def test_get_instance_size_public_alias(sdata):
+def test_get_instance_size_matches_raster_aggregator_area(sdata):
     se_labels = sdata["blobs_labels"]
-    mask = se_labels.data[None, ...].rechunk(512)
+    mask = se_labels.data[None, ...].rechunk(256)
 
-    df_public = get_instance_size(mask, instance_size_key=_CELLSIZE_KEY, run_on_gpu=False)
-    df_private = _get_mask_area(mask, instance_size_key=_CELLSIZE_KEY, run_on_gpu=False)
+    expected = RasterAggregator(mask, run_on_gpu=False, instance_size_key=_CELLSIZE_KEY).aggregate_area()
+    actual = get_instance_size(mask, instance_size_key=_CELLSIZE_KEY)
 
-    assert df_public.equals(df_private)
+    pd.testing.assert_frame_equal(actual, expected)
 
 
 def test_get_instance_size_empty_index_returns_empty_dataframe(sdata):
@@ -493,7 +499,7 @@ def test_get_instance_size_empty_index_returns_empty_dataframe(sdata):
     mask = se_labels.data[None, ...].rechunk(512)
     empty_index = np.array([], dtype=np.int64)
 
-    df_public = get_instance_size(mask, index=empty_index, instance_size_key=_CELLSIZE_KEY, run_on_gpu=False)
+    df_public = get_instance_size(mask, index=empty_index, instance_size_key=_CELLSIZE_KEY)
 
     assert df_public.empty
     assert list(df_public.columns) == [_INSTANCE_KEY, _CELLSIZE_KEY]

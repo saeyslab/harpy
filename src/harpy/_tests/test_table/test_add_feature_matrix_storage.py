@@ -56,15 +56,14 @@ def feature_sdata(tmp_path):
             table.uns[metadata_key] = {
                 "features": {
                     "feature_columns": ["area"],
-                    "schema_version": 1,
-                    "backend": "numpy",
+                    "schema_version": 2,
                     "source_kind": "harpy_add_feature_matrix",
-                    "dtype": "float64",
-                    "source_label": ["A", "B"],
-                    "source_image": [None, None],
                     "source_channels": None,
-                    "coordinate_system": ["old_A", "old_B"],
                     "features": ["area"],
+                    "regions": {
+                        "A": {"image_element": None, "coordinate_system": "old_A"},
+                        "B": {"image_element": None, "coordinate_system": "old_B"},
+                    },
                     "extra": "keep",
                 }
             }
@@ -100,7 +99,10 @@ def test_regional_feature_update_uses_expected_source(feature_sdata, monkeypatch
     local_values = np.arange(110, 116, dtype=float).reshape(6, 1)
     if existing:
         table.obsm["features"] = da.from_array(local_values, chunks=(2, 1))
-        table.uns["feature_matrices"]["features"]["coordinate_system"] = ["local_A", "local_B"]
+        table.uns["feature_matrices"]["features"]["regions"] = {
+            "A": {"image_element": None, "coordinate_system": "local_A"},
+            "B": {"image_element": None, "coordinate_system": "local_B"},
+        }
     deferred = not backed and existing
     original_adapter = feature_writer.add_table_components_by_region
 
@@ -137,10 +139,15 @@ def test_regional_feature_update_uses_expected_source(feature_sdata, monkeypatch
         assert isinstance(features, np.ndarray)
     np.testing.assert_array_equal(features, expected)
     metadata = table.uns["feature_matrices"]["features"]
-    assert list(metadata["coordinate_system"]) == (
-        ["old_B" if backed else "local_B", "global"] if existing else ["global"]
+    assert _coordinate_systems(metadata) == (
+        {"A": "global", "B": "old_B" if backed else "local_B"} if existing else {"A": "global"}
     )
     assert list(metadata["feature_columns"]) == ["area"]
+
+
+def _coordinate_systems(metadata) -> dict:
+    """Return the coordinate system of each region in the metadata of add_feature_matrix."""
+    return {region: entry["coordinate_system"] for region, entry in metadata["regions"].items()}
 
 
 @pytest.mark.parametrize("existing", [False, True])
@@ -236,8 +243,7 @@ def test_backed_update_preserves_other_regions_and_unrelated_data(feature_sdata,
     assert table.uns["unrelated"]["value"] == 99
     assert table.uns["custom_features"]["other"] == {"local_note": "unsaved"}
     metadata = table.uns["custom_features"]["features"]
-    np.testing.assert_array_equal(metadata["source_label"], ["B", "A"] if existing else ["A"])
-    np.testing.assert_array_equal(metadata["coordinate_system"], ["old_B", "global"] if existing else ["global"])
+    assert _coordinate_systems(metadata) == ({"A": "global", "B": "old_B"} if existing else {"A": "global"})
     if existing:
         assert metadata["extra"] == "keep"
     reopened = read_table(sdata.path, table_name="counts", mode="eager")
@@ -277,13 +283,23 @@ def test_unbacked_regional_updates_preserve_values_and_sources_without_writing(f
     # In-memory features give an in-memory matrix, so the second update does not build on a lazy merge.
     assert isinstance(table.obsm["features"], np.ndarray)
     np.testing.assert_array_equal(table.obsm["features"][:, 0], [1, 2, 3, 3, 2, 1])
-    assert table.uns["feature_matrices"]["features"]["source_label"] == ["B", "A"]
-    assert table.uns["feature_matrices"]["features"]["source_image"] == [None, None]
+    assert table.uns["feature_matrices"]["features"]["regions"] == {
+        "A": {"image_element": None, "coordinate_system": "global"},
+        "B": {"image_element": None, "coordinate_system": "global"},
+    }
 
 
 @pytest.mark.parametrize("backed", [False, True])
-@pytest.mark.parametrize("reason", ["columns", "column_order", "missing_metadata"])
-def test_rejected_feature_updates_leave_matrix_and_metadata_unchanged(feature_sdata, backed, reason):
+@pytest.mark.parametrize(
+    ("reason", "message"),
+    [
+        ("columns", "compatible schema"),
+        ("column_order", "compatible schema"),
+        ("missing_metadata", "compatible schema"),
+        ("version_1", r"compatible schema.*remove_table_components"),
+    ],
+)
+def test_rejected_feature_updates_leave_matrix_and_metadata_unchanged(feature_sdata, backed, reason, message):
     sdata = feature_sdata(backed=backed)
     table = sdata.tables["counts"]
     features = ["area"]
@@ -293,6 +309,13 @@ def test_rejected_feature_updates_leave_matrix_and_metadata_unchanged(feature_sd
         table.uns["feature_matrices"]["features"]["feature_columns"] = ["perimeter", "area"]
         table.obsm["features"] = np.zeros((6, 2))
         features = ["area", "perimeter"]
+    elif reason == "version_1":
+        # Metadata as Harpy 0.5 wrote it: schema version 1, with parallel lists in place of regions.
+        record = table.uns["feature_matrices"]["features"]
+        del record["regions"]
+        record.update(
+            schema_version=1, source_label=["A", "B"], source_image=[None, None], coordinate_system=["old_A", "old_B"]
+        )
     else:
         del table.uns["feature_matrices"]["features"]
     if backed:
@@ -302,7 +325,7 @@ def test_rejected_feature_updates_leave_matrix_and_metadata_unchanged(feature_sd
             write_elem(root["tables/counts/obsm"], "features", table.obsm["features"])
     previous_matrix, previous_metadata = table.obsm["features"], table.uns["feature_matrices"]
     before = _store_bytes(sdata.path) if backed else None
-    with pytest.raises(ValueError, match="compatible schema"):
+    with pytest.raises(ValueError, match=message):
         add_feature_matrix(
             sdata,
             "A",
@@ -414,11 +437,11 @@ def test_incompatible_feature_matrix_is_rejected_without_payload_reads(
 
 
 @pytest.mark.parametrize("backed", [False, True])
-def test_feature_metadata_uses_existing_matrix_dtype(feature_sdata, backed):
-    """Metadata describes the destination dtype, not the calculated float64 values.
+def test_feature_update_keeps_the_existing_matrix_dtype(feature_sdata, backed):
+    """An update writes in the existing matrix's dtype, not that of the calculated float64 values.
 
     For backed updates, the stored matrix is authoritative even when the local
-    matrix and its metadata still describe an older dtype.
+    matrix still has an older dtype.
     """
     sdata = feature_sdata(backed=backed)
     table = sdata.tables["counts"]
@@ -434,7 +457,6 @@ def test_feature_metadata_uses_existing_matrix_dtype(feature_sdata, backed):
     )
 
     assert table.obsm["features"].dtype == np.dtype("complex128")
-    assert table.uns["feature_matrices"]["features"]["dtype"] == "complex128"
     expected = existing.copy()
     expected[[1, 3, 5], 0] = [2, 3, 1]
     result = table.obsm["features"]

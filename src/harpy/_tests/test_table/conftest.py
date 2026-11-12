@@ -38,6 +38,16 @@ def class_aware_sdata():
     categorical ``code_class`` columns; both reference ``feature_panel_test``, a
     copy of ``class_aware_panel``.
     """
+    return _class_aware_sdata()
+
+
+@pytest.fixture(scope="session")
+def make_class_aware_sdata():
+    """Return a function that builds a fresh ``class_aware_sdata``, for fixtures of a wider scope than a test."""
+    return _class_aware_sdata
+
+
+def _class_aware_sdata() -> SpatialData:
     labels_a = Labels2DModel.parse(
         np.array(
             [

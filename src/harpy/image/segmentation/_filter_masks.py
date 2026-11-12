@@ -132,7 +132,6 @@ def filter_labels(
             index=label_ids,
             instance_key="instance_id",
             instance_size_key="instance_size",
-            run_on_gpu=False,
         )
         kept_label_ids = instance_sizes.loc[
             instance_sizes["instance_size"].between(min_size, max_size, inclusive="both"),

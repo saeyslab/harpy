@@ -15,9 +15,9 @@ from spatialdata.transformations import get_transformation
 
 from harpy.image._image import get_dataarray
 from harpy.image.segmentation._grid import add_grid_labels
-from harpy.utils._aggregate import RasterAggregator
 from harpy.utils._featurize import Featurizer
 from harpy.utils._keys import _INSTANCE_KEY, _SPATIAL
+from harpy.utils._moments import MomentAggregator
 
 try:
     import squidpy as sq
@@ -226,15 +226,11 @@ def _get_values_grid_most_frequent(
     if not df_most_frequent[_INSTANCE_KEY].is_unique:
         raise ValueError(f"Instance key '{_INSTANCE_KEY}' is not unique. Please report this bug.")
 
-    aggregator = RasterAggregator(
-        mask_dask_array=mask_grid,
-        image_dask_array=None,
-        instance_key=_INSTANCE_KEY,
-    )
+    aggregator = MomentAggregator(mask_dask_array=mask_grid, instance_key=_INSTANCE_KEY)
 
     # this way we prevent recalculation of labels
     index = featurizer._labels[featurizer._labels != 0]
-    df_center_of_mass = aggregator.center_of_mass(index=index)
+    (df_center_of_mass,) = aggregator.aggregate_stats("center_of_mass", index=index)
     df_center_of_mass.rename(columns={0: "z", 1: "y", 2: "x"}, inplace=True)
 
     # sanity check

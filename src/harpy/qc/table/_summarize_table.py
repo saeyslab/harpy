@@ -39,9 +39,9 @@ from harpy.qc._summary_schema import (
 )
 from harpy.qc._summary_statistics import _points_statistics
 from harpy.qc.table._table_summary_metadata import TableSummaryMetadata
+from harpy.table._metadata import _FEATURE_MATRICES_KEY
 from harpy.table._utils import _spatialdata_annotation
 from harpy.table._validation import _metadata_string_sequence, _validate_feature_matrix_record
-from harpy.utils._keys import _FEATURE_MATRICES_KEY
 from harpy.utils._names import _names, _selected_names
 
 

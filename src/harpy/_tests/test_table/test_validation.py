@@ -7,7 +7,7 @@ from spatialdata.models import Labels2DModel, TableModel
 
 from harpy.table import validate_table
 from harpy.table._allocation import aggregate_points
-from harpy.table._validation import _validate_table_annotation
+from harpy.table._validation import _validate_table_annotation, _validate_table_annotation_without_sdata
 
 
 def test_validate_table_accepts_a_registered_generic_feature_matrix(backed_class_aware_sdata):
@@ -22,7 +22,7 @@ def test_validate_table_accepts_a_registered_generic_feature_matrix(backed_class
     adata.obsm["derived_features"] = np.ones((adata.n_obs, 2), dtype=np.float64)
     adata.uns["feature_matrices"] = {
         "derived_features": {
-            "schema_version": 1,
+            "schema_version": 2,
             "source_kind": "test_features",
             "backend": "numpy",
             "dtype": "float64",
@@ -47,7 +47,7 @@ def test_validate_table_checks_only_the_selected_feature_matrix_registry(backed_
     # One name for two columns: an invalid record, registered under a custom key.
     adata.uns["custom_feature_matrices"] = {
         "derived_features": {
-            "schema_version": 1,
+            "schema_version": 2,
             "source_kind": "test_features",
             "feature_columns": ["first"],
         }
@@ -156,16 +156,50 @@ def test_validate_table_annotation_rejects_region_mismatches(observed_regions, d
         _validate_table_annotation(sdata, "table")
 
 
+def test_validate_table_annotation_without_sdata_checks_all_but_the_region_elements() -> None:
+    """Only the check that the regions exist needs sdata; the others run on the table alone."""
+    # SpatialData only warns about a table that annotates an element it does not
+    # contain; Harpy's annotation check rejects it.
+    sdata = SpatialData(tables={"table": _labels_table_sdata().tables["table"]})
+    table = sdata.tables["table"]
+
+    annotation = _validate_table_annotation_without_sdata(table, name="tables[0]", path="tables[0]")
+    assert annotation == ("region", "cell_ID", ("labels",))
+    with pytest.raises(ValueError, match=r"missing spatial elements: \['labels'\]"):
+        _validate_table_annotation(sdata, "table")
+
+    table.obs["cell_ID"] = [1, 1]
+    with pytest.raises(ValueError, match=r"Table tables\[0\] contains duplicate \(region, instance\)"):
+        _validate_table_annotation_without_sdata(table, name="tables[0]", path="tables[0]")
+
+
 @pytest.mark.parametrize("matrix_name", ["spatial_canonical", "spatial"])
 def test_validate_table_rejects_a_feature_matrix_under_a_reserved_key(matrix_name) -> None:
     sdata = _labels_table_sdata()
     table = sdata.tables["table"]
     table.obsm[matrix_name] = np.ones((table.n_obs, 1))
     table.uns["feature_matrices"] = {
-        matrix_name: {"schema_version": 1, "source_kind": "test_features", "feature_columns": ["first"]}
+        matrix_name: {"schema_version": 2, "source_kind": "test_features", "feature_columns": ["first"]}
     }
 
     with pytest.raises(ValueError, match="reserved .obsm key"):
+        validate_table(sdata, "table")
+
+
+def test_validate_table_rejects_feature_metadata_of_schema_version_1() -> None:
+    """Metadata as Harpy 0.5 wrote it raises, and the error says to compute the matrix again."""
+    sdata = _labels_table_sdata()
+    table = sdata.tables["table"]
+    table.obsm["features"] = np.ones((table.n_obs, 1))
+    table.uns["feature_matrices"] = {
+        "features": {"schema_version": 1, "source_kind": "harpy_add_feature_matrix", "feature_columns": ["area"]}
+    }
+
+    with pytest.raises(
+        ValueError,
+        match=r"schema_version must equal 2, found 1\. Compute the matrix again with the function that wrote it, "
+        r"named by its source_kind 'harpy_add_feature_matrix'",
+    ):
         validate_table(sdata, "table")
 
 

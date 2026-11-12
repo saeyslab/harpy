@@ -559,7 +559,7 @@ def test_class_aware_aggregation_writes_one_count_matrix_per_class(tmp_path, cla
         np.testing.assert_array_equal(matrix.to_memory()[order].toarray(), counts)
         record = adata.uns["feature_matrices"][key]
         assert set(record) == {"schema_version", "source_kind", "feature_columns"}
-        assert (record["schema_version"], record["source_kind"]) == (1, "harpy_aggregate_points")
+        assert (record["schema_version"], record["source_kind"]) == (2, "harpy_aggregate_points")
         assert list(record["feature_columns"]) == feature_columns
 
     # The record describes the sources only: it names no class.

@@ -13,6 +13,7 @@ from spatialdata.models import TableModel
 
 from harpy._storage._anndata import (
     _DenseChunks,
+    _matrix_format,
     _read_anndata_element,
     _SparseChunks,
     _validate_dense_chunks,
@@ -27,7 +28,6 @@ from harpy.table.io._components import (
 )
 from harpy.table.io._read import ComponentPath
 from harpy.table.io._write_by_region import (
-    _matrix_format,
     _prepare_regional_matrix,
     _regional_row_positions,
     _validate_regional_request,
