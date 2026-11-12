@@ -1,3 +1,4 @@
+import dask.array as da
 import numpy as np
 import pandas as pd
 import pytest
@@ -5,8 +6,79 @@ from scipy import ndimage
 from skimage.measure import regionprops_table
 from spatialdata import read_zarr
 
+from harpy.image._image import add_image, add_labels
 from harpy.table._add_feature_matrix import add_feature_matrix
 from harpy.utils._keys import _INSTANCE_KEY
+
+
+@pytest.mark.parametrize(
+    ("labels_name", "image_name", "features"),
+    [
+        (["masks_whole", "masks_empty"], "raw_image", ["mean", "area"]),
+        ("masks_empty", None, ["area"]),
+        ("masks_empty", None, ["eccentricity"]),
+    ],
+)
+def test_add_feature_matrix_rejects_labels_without_instances(
+    sdata_multi_c_no_backed, labels_name, image_name, features
+):
+    shape = sdata_multi_c_no_backed["masks_whole"].shape
+    sdata_multi_c_no_backed = add_labels(
+        sdata_multi_c_no_backed, da.zeros(shape, dtype=np.int32, chunks=256), output_labels_name="masks_empty"
+    )
+
+    with pytest.raises(ValueError, match=r"Labels element 'masks_empty' contains no instances, only background"):
+        add_feature_matrix(
+            sdata_multi_c_no_backed,
+            labels_name=labels_name,
+            image_name=image_name,
+            table_name=None,
+            output_table_name="table_features",
+            feature_key="features",
+            features=features,
+            channels=[0],
+        )
+    assert "table_features" not in sdata_multi_c_no_backed.tables
+
+
+def test_add_feature_matrix_3d_labels(sdata_multi_c_no_backed):
+    # two identical z-planes: every instance has twice the 2D area and the same 2D mean
+    mask = sdata_multi_c_no_backed["masks_whole"].data
+    image = sdata_multi_c_no_backed["raw_image"].data
+    sdata_multi_c_no_backed = add_labels(
+        sdata_multi_c_no_backed, da.stack([mask, mask]), output_labels_name="masks_3d", dims=("z", "y", "x")
+    )
+    sdata_multi_c_no_backed = add_image(
+        sdata_multi_c_no_backed,
+        da.stack([image, image], axis=1),
+        output_image_name="image_3d",
+        dims=("c", "z", "y", "x"),
+        c_coords=[str(channel) for channel in sdata_multi_c_no_backed["raw_image"].c.data],
+    )
+
+    def features(features, image_name):
+        sdata = add_feature_matrix(
+            sdata_multi_c_no_backed,
+            labels_name="masks_3d",
+            image_name=image_name,
+            table_name=None,
+            output_table_name="table_3d",
+            feature_key="features",
+            features=features,
+            channels=[0],
+        )
+        return sdata.tables["table_3d"]
+
+    adata = features(["mean", "area"], "image_3d")
+    labels = adata.obs[_INSTANCE_KEY].to_numpy()
+    mask_2d, image_2d = mask.compute(), image[0].compute()
+    expected = np.column_stack(
+        [ndimage.mean(image_2d, mask_2d, labels), 2 * ndimage.sum_labels(np.ones(mask_2d.shape), mask_2d, labels)]
+    )
+    np.testing.assert_allclose(np.asarray(adata.obsm["features"]), expected, rtol=1e-6)
+
+    with pytest.raises(ValueError, match=r"\['perimeter'\] are not supported for 3D labels data"):
+        features(["area", "perimeter"], None)
 
 
 def test_add_feature_matrix_creates_new_table(sdata_multi_c_no_backed):
@@ -266,6 +338,74 @@ def test_add_feature_matrix_supports_custom_metadata_key(sdata_multi_c_no_backed
     assert adata.uns["custom_feature_matrices"]["area_features"]["feature_columns"] == ["area"]
     assert adata.uns["custom_feature_matrices"]["area_features"]["source_kind"] == "harpy_add_feature_matrix"
     assert adata.uns["custom_feature_matrices"]["area_features"]["source_channels"] is None
+
+
+def test_add_feature_matrix_rejects_table_rows_missing_from_labels(sdata_multi_c_no_backed):
+    sdata_multi_c_no_backed = add_feature_matrix(
+        sdata_multi_c_no_backed,
+        labels_name="masks_whole",
+        image_name=None,
+        table_name=None,
+        output_table_name="table_features",
+        feature_key="area_features",
+        features=["area"],
+    )
+    # remove two instances from the labels, so that the table and the labels are out of sync
+    removed = sdata_multi_c_no_backed.tables["table_features"].obs[_INSTANCE_KEY].to_numpy()[[3, 7]]
+    labels = sdata_multi_c_no_backed["masks_whole"]
+    sdata_multi_c_no_backed["masks_whole"] = labels.copy(data=da.where(da.isin(labels.data, removed), 0, labels.data))
+
+    message = (
+        rf"2 rows of table 'table_features' have instance IDs that do not occur in labels element 'masks_whole' "
+        rf"\(e\.g\. {removed[0]}, {removed[1]}\)\. The labels and the table are out of sync"
+    )
+    with pytest.raises(ValueError, match=message):
+        add_feature_matrix(
+            sdata_multi_c_no_backed,
+            labels_name="masks_whole",
+            image_name="raw_image",
+            table_name="table_features",
+            feature_key="mean_features",
+            features=["mean"],
+            channels=[0],
+        )
+    assert "mean_features" not in sdata_multi_c_no_backed.tables["table_features"].obsm
+
+
+def test_add_feature_matrix_existing_table_keeps_its_rows(sdata_multi_c_no_backed):
+    # Instances of the labels without a table row, e.g. after a QC filter, get no row.
+    sdata_multi_c_no_backed = add_feature_matrix(
+        sdata_multi_c_no_backed,
+        labels_name="masks_whole",
+        image_name=None,
+        table_name=None,
+        output_table_name="table_features",
+        feature_key="area_features",
+        features=["area"],
+    )
+    table = sdata_multi_c_no_backed.tables["table_features"]
+    sdata_multi_c_no_backed.tables["table_features"] = table[np.arange(table.n_obs) % 3 != 0].copy()
+    kept_obs_names = sdata_multi_c_no_backed.tables["table_features"].obs_names.copy()
+
+    sdata_multi_c_no_backed = add_feature_matrix(
+        sdata_multi_c_no_backed,
+        labels_name="masks_whole",
+        image_name="raw_image",
+        table_name="table_features",
+        feature_key="mean_features",
+        features=["mean"],
+        channels=[0],
+    )
+
+    adata = sdata_multi_c_no_backed.tables["table_features"]
+    pd.testing.assert_index_equal(adata.obs_names, kept_obs_names)
+    labels = adata.obs[_INSTANCE_KEY].to_numpy()
+    expected = ndimage.mean(
+        sdata_multi_c_no_backed["raw_image"].data[0].compute(),
+        sdata_multi_c_no_backed["masks_whole"].data.compute(),
+        labels,
+    )
+    np.testing.assert_allclose(np.asarray(adata.obsm["mean_features"])[:, 0], expected, rtol=1e-6)
 
 
 def test_add_feature_matrix_existing_table_preserves_other_regions(sdata_pixie_intensities):
