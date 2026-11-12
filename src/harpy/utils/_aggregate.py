@@ -12,8 +12,9 @@ from loguru import logger as log
 from numpy.typing import NDArray
 from scipy import ndimage
 
+from harpy.experimental._moments import MomentAggregator
 from harpy.utils._keys import _CELLSIZE_KEY, _INSTANCE_KEY
-from harpy.utils.utils import _da_unique, _get_xp, _to_cupy_dask_array, _to_numpy
+from harpy.utils.utils import _da_unique, _get_xp, _to_cupy_dask_array, _to_numpy, _to_numpy_dask_array
 
 
 class RasterAggregator:
@@ -341,9 +342,10 @@ class RasterAggregator:
         -------
         A DataFrame with one column for area and one for label ID.
         """
-        return _get_mask_area(
-            self._mask, index=index, instance_key=self._instance_key, instance_size_key=self._instance_size_key
-        )
+        if index is None:
+            index = _da_unique(self._mask, run_on_gpu=self._run_on_gpu)
+        area = _calculate_area(self._mask, index=index, run_on_gpu=self._run_on_gpu)
+        return pd.DataFrame({self._instance_key: _to_numpy(index), self._instance_size_key: _to_numpy(area.ravel())})
 
     def center_of_mass(self, index: NDArray | None = None) -> pd.DataFrame:
         """
@@ -1112,57 +1114,50 @@ class RasterAggregator:
     '''
 
 
-def _get_mask_area(
-    mask: da.Array,
-    index: NDArray | None = None,
-    instance_key: str = _INSTANCE_KEY,
-    instance_size_key: str = _CELLSIZE_KEY,
-    run_on_gpu: bool = True,
-) -> pd.DataFrame:
-    assert mask.ndim == 3, "Currently only 3D masks are supported ('z','y','x')."
-    if index is None:
-        index = _da_unique(mask, run_on_gpu=run_on_gpu)
-    _result = _calculate_area(mask, index=index, run_on_gpu=run_on_gpu)
-    return pd.DataFrame({instance_key: _to_numpy(index), instance_size_key: _to_numpy(_result.ravel())})
-
-
 def get_instance_size(
     mask: da.Array,
     index: NDArray | None = None,
     instance_key: str = _INSTANCE_KEY,
     instance_size_key: str = _CELLSIZE_KEY,
-    run_on_gpu: bool = True,
 ) -> pd.DataFrame:
     """
     Calculate the size of labeled instances in a mask.
 
+    The size of an instance is its number of pixels, counted in one pass over
+    the mask with ``harpy.experimental.MomentAggregator``. It runs on the CPU:
+    a CuPy-backed mask is copied to host memory block by block.
+
     Parameters
     ----------
     mask
-        A 3D labels mask with dimensions ``('z', 'y', 'x')``.
+        A 3D labels mask with dimensions ``('z', 'y', 'x')`` and an integer
+        dtype.
     index
-        Optional subset of instance ids for which to calculate the size. If `None`, all
-        instance ids in `mask` are used. If an empty index is provided, an empty
-        DataFrame is returned.
+        Optional subset of instance ids for which to calculate the size. If
+        `None`, all instance ids in `mask` are used, background included. An id
+        that is absent from `mask` gets size 0. If an empty index is provided,
+        an empty DataFrame is returned.
     instance_key
         Name of the output column containing the instance ids.
     instance_size_key
         Name of the output column containing the instance sizes.
-    run_on_gpu
-        If `True`, use the GPU backend when available.
 
     Returns
     -------
-    A :class:`~pandas.DataFrame` with one row per instance and a column containing the
-    instance size.
+    A :class:`~pandas.DataFrame` with one row per instance, in the order of
+    `index` or in ascending order if `index` is `None`, and a float32 column
+    containing the instance size.
     """
-    return _get_mask_area(
-        mask=mask,
-        index=index,
-        instance_key=instance_key,
-        instance_size_key=instance_size_key,
-        run_on_gpu=run_on_gpu,
-    )
+    if index is not None:
+        index = _to_numpy(index)
+        if index.size == 0:
+            return pd.DataFrame({instance_key: index, instance_size_key: np.empty(0, dtype=np.float32)})
+    _, is_cupy = _get_xp(getattr(mask, "_meta", None))
+    if is_cupy:
+        mask = _to_numpy_dask_array(mask)
+    aggregator = MomentAggregator(mask_dask_array=mask, instance_key=instance_key)
+    (sizes,) = aggregator.aggregate_stats("count", index=index)
+    return sizes.rename(columns={0: instance_size_key}).loc[:, [instance_key, instance_size_key]]
 
 
 def _calculate_area(mask: da.Array, index: NDArray | None = None, run_on_gpu: bool = True) -> NDArray:
