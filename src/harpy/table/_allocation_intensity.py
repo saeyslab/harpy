@@ -6,7 +6,6 @@ from functools import reduce
 from typing import Literal
 
 import anndata as ad
-import dask.array as da
 import numpy as np
 import pandas as pd
 from anndata import AnnData
@@ -14,10 +13,10 @@ from loguru import logger as log
 from spatialdata import SpatialData
 from spatialdata.models import TableModel
 
+from harpy.experimental._moments import MomentAggregator
 from harpy.image._image import _get_translation, get_dataarray
 from harpy.table._utils import _sanity_check_append_region
 from harpy.table.io._add_table import add_table
-from harpy.utils._aggregate import RasterAggregator
 from harpy.utils._deprecation import _renamed_functions
 from harpy.utils._keys import _CELL_INDEX, _CELLSIZE_KEY, _INSTANCE_KEY, _REGION_KEY, _SPATIAL
 
@@ -39,86 +38,113 @@ def aggregate_image(
     spatial_key: str = _SPATIAL,
     instance_size_key: str = _CELLSIZE_KEY,
     cell_index_name: str = _CELL_INDEX,
-    run_on_gpu: bool = False,
     overwrite: bool = True,
 ) -> SpatialData:
     """
-    Aggregate image intensities within labeled instances and store the resulting per-instance table in the SpatialData object.
+    Aggregate image intensities per labeled instance into a table.
 
-    It requires that the image element and the labels element have the same shape and alignment.
+    For every instance in `labels_name`, the intensities of the selected
+    channels of `image_name` are aggregated with `mode` into `.X` of
+    `sdata.tables[output_table_name]`: one row per instance, one column per
+    channel. The statistics in `obs_stats` are added to `.obs`, and the center
+    of mass of each instance to `.obsm[spatial_key]`. All of them are computed
+    in one pass over the image and the labels, with
+    ``harpy.experimental.MomentAggregator``.
 
-    Internally this function uses :func:`harpy.utils.RasterAggregator`.
+    The image and labels elements must have the same spatial shape and the
+    same translation in `to_coordinate_system`. Misalignments must be resolved
+    before calling this function.
+
+    **Writes** one table at `sdata.tables[output_table_name]`::
+
+        adata.X                          float32: mode of each channel, per instance
+        adata.var_names                  channel names; index named "channels"
+        adata.obs index                  "<instance>_<labels_name>_<token>", named
+                                         cell_index_name
+        adata.obs[region_key]            categorical: labels_name
+        adata.obs[instance_key]          int64: the row's label value
+        adata.obs[instance_size_key]     if obs_stats contains "count": float32, pixels
+                                         per instance
+        adata.obs[f"{stat}_{channel}"]   each other statistic in obs_stats, per channel:
+                                         float32, min and max in the image dtype
+        adata.obsm[spatial_key]          if calculate_center_of_mass: float64 center of
+                                         mass in to_coordinate_system, (x, y) for 2D
+                                         labels, (z, x, y) for 3D labels
+        adata.uns["spatialdata_attrs"]   region, region_key, instance_key
+
+    The background, label 0, gets no row.
 
     Parameters
     ----------
     sdata
-        The SpatialData object containing spatial information about cells.
+        The SpatialData object.
     image_name
-        The name of the image element in `sdata` that contains the image data from which to extract intensity information.
-        Both the `image_name` and `labels_name` should have the same shape and alignment. If not provided,
-        will use last image_name.
+        Image element from which intensities are aggregated. If `None`, the
+        last image element in `sdata` is used, with a warning.
     labels_name
-        The name of the labels element in `sdata` containing the labels (segmentation) used to define the boundaries of cells.
-        These labels correspond with regions in the `image_name`. If not provided, will use last labels_name.
-    output_table_name: str, optional
-        The table element in `sdata` in which to save the :class:`~anndata.AnnData` object with the intensity values per cell.
+        Labels element whose instances are aggregated over. If `None`, the last
+        labels element in `sdata` is used, with a warning.
+    output_table_name
+        Table element in which to store the resulting AnnData object.
     channels
-        Specifies the channels to be considered when extracting intensity information from the `image_name`.
-        This parameter can take a single integer or string or an iterable of integers or strings representing specific channels.
-        If set to None (the default), intensity data will be aggregated from all available channels within the image element.
+        Channel or channels of `image_name` to aggregate, given as values of
+        its `c` coordinate. If `None`, all channels are used.
     mode
-        When mode is set to `"sum"`, the total intensity for each label will be added to `.X` of the resulting `output_table_name`; if set to `"mean"`, it calculates the average intensity per label.
+        Statistic stored in `.X`: `"mean"` for the mean intensity per instance,
+        `"sum"` for the total intensity.
     obs_stats
-        Statistics to add to `.obs` of `output_table_name`.
-        Supported values: `["sum", "mean", "count", "var", "kurtosis", "skew", "max", "min"]`.
+        Statistics to add to `.obs`, as a list or a single string. Choose from
+        `"sum"`, `"mean"`, `"count"`, `"var"`, `"kurtosis"`, `"skew"`, `"max"`
+        and `"min"`.
 
-        - If `obs_stats` contains `"mode"`, it will **not** be added to `.obs`.
-        - For each `stat` in `["sum", "mean", "var", "kurtosis", "skew", "max", "min"]`, the result is stored as: `{channel_name}_{stat}`.
-        - `"count"` is stored in `.obs` using the name given by `instance_size_key`.
-
+        - Each statistic except `"count"` is stored per channel as
+          `{stat}_{channel_name}`.
+        - `"count"`, the number of pixels per instance, is stored as
+          `instance_size_key`.
+        - The statistic given as `mode` is already in `.X` and is not added to
+          `.obs` again.
     to_coordinate_system
-        The coordinate system that holds `image_name` and `labels_name`.
-        This should be the intrinsic coordinate system in pixels.
+        Coordinate system that holds `image_name` and `labels_name`. It should
+        be in pixels: only the translation of the elements in it is used.
     chunks
-        The chunk size for processing the image data. If provided as a tuple, desired chunksize for (z), y, x should be provided.
+        Optional chunk size used to rechunk the image and labels arrays. A
+        tuple gives the chunk size of (z,) y and x. Rechunking on disk ahead of
+        time is often more efficient.
     append
-        If set to True, and the `labels_name` does not yet exist as a `region_key` in `sdata.tables[output_table_name].obs`,
-        the intensity values extracted during the current function call will be appended (along axis=0) to any existing intensity data
-        within the SpatialData object's table attribute. If False, and overwrite is set to True any existing data in `sdata.tables[output_table_name]` will be overwritten by the newly extracted intensity values.
-        Note that we join the :class:`~anndata.AnnData` objects using :func:`~anndata.concat` with `join="inner"`.
+        If `True`, append the rows to `sdata.tables[output_table_name]` and add
+        `labels_name` to its regions, or create the table if it does not exist.
+        The tables are joined with :func:`anndata.concat` and `join="inner"`.
+        The existing table must use the same `region_key` and `instance_key`,
+        and `labels_name` must not be one of its regions yet. If `False`, the
+        table holds only the rows of `labels_name`.
     calculate_center_of_mass
-        If `True`, the center of mass of the labels in `labels_name` will be calculated and added to `sdata.tables[ output_table_name ].obsm[spatial_key]`.
-        The center of mass is computed using `scipy.ndimage.center_of_mass`. Enabling `calculate_center_of_mass` will cause the `labels_name` to be loaded into memory.
-    instance_key
-        Instance key. The name of the column in :class:`~anndata.AnnData` table `.obs` that will hold the instance ids.
+        If `True`, store the center of mass of each instance in
+        `.obsm[spatial_key]`. It is computed in the same pass over the labels
+        as the intensity statistics.
     region_key
-        Region key. The name of the column in  :class:`~anndata.AnnData` table `.obs` that will hold the name of the element(s) that are annotated by the resulting table.
+        Column in `.obs` holding the labels element of each row.
+    instance_key
+        Column in `.obs` holding the label value of each row.
     spatial_key
-        The key in the :class:`~anndata.AnnData` table `.obsm` that will hold the `x` and `y` center of the instances.
-        This center is calculated by calculating the center of mass of each cell in `labels_name`.
+        Key in `.obsm` for the center of mass of each instance.
     instance_size_key
-        The key in the :class:`~anndata.AnnData` table `.obs` that will hold the size of the instances. Ignored if "count" not in `obs_stats`.
+        Column in `.obs` for the number of pixels of each instance. Only used if
+        `obs_stats` contains `"count"`.
     cell_index_name
-        The name of the index of the resulting :class:`~anndata.AnnData` table.
-    run_on_gpu
-        Whether to run on gpu. If no installation of cupy could be detected, will fall back to cpu.
+        Name of the index of `.obs`.
     overwrite
-        If `True`, overwrites the `output_table_name` if it already exists in `sdata`.
+        If `True`, replace `sdata.tables[output_table_name]` if it already
+        exists.
 
     Returns
     -------
-    An updated version of the input SpatialData object augmented with a table element (`sdata.tables[output_table_name]`) :class:`~anndata.AnnData` object.
+    The updated SpatialData object.
 
     Notes
     -----
-    - The function currently supports scenarios where the `image_name` and `labels_name` are aligned and have the same
-      shape. Misalignments or differences in shape must be handled prior to invoking this function.
-    - Intensity calculation is performed per channel for each cell. The function aggregates this information and
-      attaches it as a table (:class:`~anndata.AnnData` object) within the SpatialData object.
-    - Due to the memory-intensive nature of the operation, especially for large datasets, the function implements
-      chunk-based processing, aided by Dask.
-      If sdata is backed by a Zarr store, we recommend using `chunks=None` and ensuring that the on-disk Dask array chunks are optimized for both storage efficiency and computational performance.
-
+    The image and labels are processed chunk by chunk with Dask. For a
+    Zarr-backed `sdata`, keep `chunks=None` and store the elements with chunks
+    that suit both storage and computation.
 
     Examples
     --------
@@ -157,7 +183,8 @@ def aggregate_image(
 
     See Also
     --------
-    harpy.utils.RasterAggregator : out of core calculation of statistics from raster data.
+    harpy.tb.add_feature_matrix : per-instance intensity and morphology features in `.obsm`.
+    harpy.experimental.MomentAggregator : the per-instance statistics used here, from Dask arrays.
     """
     assert mode in ["sum", "mean"], "'mode' must be either 'sum' or 'mean'."
     if obs_stats is not None:
@@ -236,31 +263,34 @@ def aggregate_image(
     channel_indices = [list(se_image.c.data).index(channel) for channel in channels]
     _array_img = _array_img[channel_indices]
 
-    # RasterAggregator requires the labels and the image to share spatial (z, y, x) chunks.
+    # MomentAggregator requires the labels and the image to share spatial (z, y, x) chunks.
     # The labels and image already share spatial shape (validated above), so align the
-    # (cheaper) single-band labels onto the image's spatial chunking when they differ.
-    # Only the aggregator's mask is rechunked; '_array_mask' is left at its native chunks
-    # for the center-of-mass path, where rechunking would significantly increase RAM usage.
-    if _array_mask_rechunked.chunksize != _array_img.chunksize[1:]:
+    # (cheaper) single-band labels onto the image's spatial chunks when they differ.
+    # Compare the chunks, not the chunk sizes: a crop off the chunk grid has the same chunk
+    # size with other chunk boundaries.
+    if _array_mask_rechunked.chunks != _array_img.chunks[1:]:
         log.info(
-            "Image and labels have different chunk sizes; rechunking labels to match "
+            "Image and labels have different chunks; rechunking labels to match "
             f"the image's spatial chunks {_array_img.chunksize[1:]} for aggregation."
         )
-        _array_mask_rechunked = _array_mask_rechunked.rechunk(_array_img.chunksize[1:])
+        _array_mask_rechunked = _array_mask_rechunked.rechunk(_array_img.chunks[1:])
 
-    aggregator = RasterAggregator(
-        image_dask_array=_array_img,
+    aggregator = MomentAggregator(
         mask_dask_array=_array_mask_rechunked,
+        image_dask_array=_array_img,
         instance_key=instance_key,
-        instance_size_key=instance_size_key,
-        run_on_gpu=run_on_gpu,
     )
-    index = da.unique(_array_mask_rechunked).compute()
 
-    if obs_stats is not None:
-        stats_funcs = [mode] + [stat for stat in obs_stats if stat != mode]
-    else:
-        stats_funcs = [mode]
+    # Every statistic in one pass: the mode, then the statistics for .obs with max and min
+    # last, as .obs orders them, then the center of mass.
+    other_stats = [stat for stat in obs_stats if stat != mode] if obs_stats is not None else []
+    obs_stats_funcs = [stat for stat in other_stats if stat not in ("max", "min")]
+    obs_stats_funcs += [stat for stat in ("max", "min") if stat in other_stats]
+    stats_funcs = [mode, *obs_stats_funcs]
+    if calculate_center_of_mass:
+        stats_funcs.append("center_of_mass")
+    # Without an index, the rows are every label of the mask, background included, in ascending order.
+    dfs = aggregator.aggregate_stats(stats_funcs=stats_funcs)
 
     def rename_columns(_df: pd.DataFrame, prefix: str):
         # helper function to rename column of a dataframe to prefix_channel_name
@@ -272,30 +302,15 @@ def aggregate_image(
                 new_columns.append(_name)
         _df.columns = new_columns
 
-    # Calculate max and min if necessary.
-    df_max = df_min = None
-    if "max" in stats_funcs:
-        stats_funcs.remove("max")
-        df_max = aggregator.aggregate_max(index=index)
-        rename_columns(df_max, prefix="max")
-
-    if "min" in stats_funcs:
-        stats_funcs.remove("min")
-        df_min = aggregator.aggregate_min(index=index)
-        rename_columns(df_min, prefix="min")
-
-    dfs = aggregator.aggregate_stats(stats_funcs=stats_funcs, index=index)
-
     df_X = dfs[0]  # the first one is the mode
 
-    if obs_stats is not None and mode not in obs_stats:
-        df_obs = dfs[1:]
-        for _df, _prefix in zip(df_obs, stats_funcs[1:], strict=True):
+    if obs_stats_funcs:
+        df_obs = dfs[1 : 1 + len(obs_stats_funcs)]
+        for _df, _prefix in zip(df_obs, obs_stats_funcs, strict=True):
             if _prefix != "count":
                 rename_columns(_df, prefix=_prefix)
             else:
                 _df.rename(columns={0: instance_size_key}, inplace=True)
-        df_obs = df_obs + [x for x in [df_max, df_min] if x is not None]
         # merge
         df_obs = reduce(lambda left, right: pd.merge(left, right, how="inner", on=instance_key), df_obs)
 
@@ -321,29 +336,9 @@ def aggregate_image(
     _cells_id = _cells_id[_cells_id != 0]
 
     if calculate_center_of_mass:
-        # add center of cells here (via the masks).
-        coordinates = aggregator._center_of_mass(index=index[index != 0])
-        """
-        _array_mask = _array_mask.squeeze(0) if to_squeeze else _array_mask
-
-        # dask image center of mass for masks seems bugged (very slow), use in memory scipy.ndimage.center_of_mass for now.
-        in_memory = True
-        if not in_memory:
-            coordinates = center_of_mass(
-                image=_array_mask,  # do not use rechunked array mask here, leads to significant increase in required ram.
-                label_image=_array_mask,
-                index=_cells_id,
-            )
-
-            coordinates = coordinates.compute()
-        else:
-            from scipy import ndimage
-
-            _array_mask_in_memory = _array_mask.compute()
-            coordinates = np.array(
-                ndimage.center_of_mass(input=_array_mask_in_memory, labels=_array_mask_in_memory, index=_cells_id)
-            )
-        """
+        # center of the cells, (z, y, x), in the row order of df_X, without background
+        df_center = dfs[-1]
+        coordinates = df_center[df_center[instance_key] != 0].drop(columns=[instance_key]).to_numpy()
         coordinates += np.array([0, t1y, t1x])  # we account for possible translation in y and x
         # swap y and x, because adata.obsm["SPATIAL"] requires x,y.
         coordinates[:, [-2, -1]] = coordinates[:, [-1, -2]]
@@ -352,7 +347,7 @@ def aggregate_image(
         adata.obsm[spatial_key] = coordinates
 
     # merge the obs
-    if obs_stats is not None and mode not in obs_stats:
+    if obs_stats_funcs:
         adata.obs.reset_index(inplace=True)
         df_obs = df_obs[df_obs[instance_key] != 0]
         assert adata.obs.shape[0] == df_obs.shape[0], "Number of observations in `adata.obs` and `df_obs` do not match."
