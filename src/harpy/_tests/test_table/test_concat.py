@@ -312,6 +312,12 @@ def _other_obsm_keys(table_a, table_b):
     return [table_a, table_b], {}
 
 
+def _other_obsm_widths(table_a, table_b):
+    table_a.obsm["X_pca"] = np.zeros((table_a.n_obs, 2))
+    table_b.obsm["X_pca"] = np.zeros((table_b.n_obs, 3))
+    return [table_a, table_b], {}
+
+
 def _signed_instance_ids(table_a, table_b):
     table_a.obs[_INSTANCE_KEY] = table_a.obs[_INSTANCE_KEY].astype("int64")
     return [table_a, table_b], {}
@@ -370,6 +376,10 @@ def _feature_metadata_of_version_1(table_a, table_b):
         (_other_obs_columns, r"obs columns must be the same in every table: tables\[1\] lacks \['n_counts'\]"),
         (_other_layers, r"layers must be the same in every table: tables\[1\] lacks \['counts'\]"),
         (_other_obsm_keys, r"obsm keys must be the same in every table: tables\[1\] lacks \['X_pca'\]"),
+        (
+            _other_obsm_widths,
+            r"obsm\['X_pca'\] has shape\[1:\] \(2,\) in tables\[0\] and shape\[1:\] \(3,\) in tables\[1\]",
+        ),
         (_signed_instance_ids, r"obs column 'cell_ID' is int64 in tables\[0\] and uint64 in tables\[1\]; cast it"),
         (_bool_and_int_column, r"obs column 'flag' is bool in tables\[0\] and int64 in tables\[1\]; cast it"),
         (_csr_and_csc, r"X is CSR in tables\[0\] and CSC in tables\[1\]"),
