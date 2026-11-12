@@ -36,7 +36,6 @@ from harpy.utils._keys import _FEATURE_MATRICES_KEY
 
 _UNS_MERGE_STRATEGIES = (None, "same", "unique", "first", "only")
 _FORMAT_NAMES = {"dense": "dense", "csr": "CSR", "csc": "CSC", "DataFrame": "a DataFrame", None: "absent"}
-_CONVERSIONS = {"dense": ".toarray()", "csr": ".tocsr()", "csc": ".tocsc()"}
 _CANONICAL_MATRIX = f"obsm[{CANONICAL_OBSM_KEY!r}]"
 _CANONICAL_METADATA = f"uns[{SPATIAL_COORDINATES_KEY!r}][{CANONICAL_OBSM_KEY!r}]"
 
@@ -226,7 +225,7 @@ def concat(
             f"the same metadata: {_describe(mismatched_feature_matrices)}. Compute these matrices the same way for "
             "every table, or pass drop_mismatched_feature_matrices=True to drop them and their metadata."
         )
-    _check_components(parsed, dropped_feature_matrices=mismatched_feature_matrices)
+    _check_matrices(parsed, dropped_feature_matrices=mismatched_feature_matrices)
     feature_matrices_metadata = _merged_feature_matrices_metadata(
         parsed, dropped_feature_matrices=mismatched_feature_matrices, region_order=region_order
     )
@@ -249,6 +248,7 @@ def concat(
         TableModel.ATTRS_KEY,
         feature_matrices_key,
         _POINT_AGGREGATION_KEY,
+        SPATIAL_COORDINATES_KEY,
         *(f"{column}_colors" for column in palette_columns),
     }
     prepared = [
@@ -275,9 +275,7 @@ def concat(
     if point_aggregation_metadata is not None:
         result.uns[_POINT_AGGREGATION_KEY] = point_aggregation_metadata
     if canonical_metadata is not None:
-        coordinates = result.uns.get(SPATIAL_COORDINATES_KEY)
-        coordinates = dict(coordinates) if isinstance(coordinates, Mapping) else {}
-        result.uns[SPATIAL_COORDINATES_KEY] = {**coordinates, CANONICAL_OBSM_KEY: canonical_metadata}
+        result.uns[SPATIAL_COORDINATES_KEY] = {CANONICAL_OBSM_KEY: canonical_metadata}
     for column in palette_columns:
         _merge_palette(result, parsed, column=column)
     TableModel.validate(result)
@@ -532,8 +530,12 @@ def _merged_feature_matrices_metadata(
     }
 
 
-def _check_components(tables: Sequence[_Table], *, dropped_feature_matrices: Collection[str]) -> None:
-    """Check the layers and ``obsm`` keys, and that each matrix has one format and one laziness in every table."""
+def _check_matrices(tables: Sequence[_Table], *, dropped_feature_matrices: Collection[str]) -> None:
+    """Check that ``X``, the layers and the ``obsm`` matrices fit together across the tables.
+
+    The tables need the same layer and ``obsm`` keys, the same ``obsm`` widths,
+    and one format (dense, CSR, CSC or DataFrame) and one laziness per matrix.
+    """
     layer_keys = [[key for key in table.adata.layers.keys() if key is not None] for table in tables]
     _require_same_keys(
         "layers",
@@ -565,17 +567,14 @@ def _check_components(tables: Sequence[_Table], *, dropped_feature_matrices: Col
         component = slot if key is None else f"{slot}[{key!r}]"
         values = {table.name: table.adata.X if key is None else getattr(table.adata, slot)[key] for table in tables}
         by_format = _group(
-            {name: _component_format(value, component=component, table=name) for name, value in values.items()}
+            {name: _checked_matrix_format(value, component=component, table=name) for name, value in values.items()}
         )
         if len(by_format) > 1:
-            (target, _), (_, others) = list(by_format.items())[:2]
-            example = ""
-            if target in _CONVERSIONS:
-                example = f", for example with {others[0]}.{component} = {others[0]}.{component}{_CONVERSIONS[target]}"
             raise ValueError(
                 f"{component} is {_describe_groups(by_format, names=_FORMAT_NAMES)}; concat requires one format per "
                 "matrix, as anndata.concat converts mixed formats, lazily to COO, which Harpy rejects. Convert it to "
-                f"one format in every table before concatenating{example}."
+                "one format in every table before concatenating, for example with .tocsr(), .tocsc() or .toarray() "
+                "on a matrix in memory."
             )
         if None in by_format:
             continue
@@ -591,8 +590,11 @@ def _check_components(tables: Sequence[_Table], *, dropped_feature_matrices: Col
             )
 
 
-def _component_format(value: object, *, component: str, table: str) -> str | None:
-    """Return the format of a matrix, ``"DataFrame"`` for a DataFrame, or ``None`` when absent."""
+def _checked_matrix_format(value: object, *, component: str, table: str) -> str | None:
+    """Return the format of a matrix, ``"DataFrame"`` for a DataFrame, or ``None`` when absent.
+
+    Raise for a matrix that concat cannot take, such as a Zarr array without AnnData encoding.
+    """
     if value is None:
         return None
     if isinstance(value, pd.DataFrame):
@@ -643,13 +645,6 @@ def _prepared_table(
     """
     adata = table.adata
     uns = {key: deepcopy(value) for key, value in adata.uns.items() if key not in owned_uns_keys}
-    coordinates = uns.get(SPATIAL_COORDINATES_KEY)
-    if isinstance(coordinates, Mapping):
-        others = {key: value for key, value in coordinates.items() if key != CANONICAL_OBSM_KEY}
-        if others:
-            uns[SPATIAL_COORDINATES_KEY] = others
-        else:
-            del uns[SPATIAL_COORDINATES_KEY]
     # adata.layers holds X under the key None (anndata >= 0.13); AnnData sets X from it.
     return AnnData(
         obs=adata.obs.copy(),
