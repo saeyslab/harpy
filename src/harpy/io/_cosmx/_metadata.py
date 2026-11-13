@@ -31,6 +31,7 @@ def _common_element_record(
         "mosaic": {
             "mode": preview.mosaic_mode,
             "adjacency_tolerance_px": preview.adjacency_tolerance_px,
+            "number": mosaic.mosaic,
         },
         "source_origin_px": {"x": mosaic.origin_x_px, "y": mosaic.origin_y_px},
         _FOV_BOUNDS_KEY: mosaic.fov_bounds_px,

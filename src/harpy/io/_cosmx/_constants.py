@@ -14,7 +14,9 @@ class _CosmxKeys(ModeEnum):
     MORPHOLOGY_DIR = "Morphology2D"
     ANALYSIS_RESULTS_DIR = "AnalysisResults"
 
-    TRANSCRIPT_SUFFIX = "target_call_coord.csv"
+    # Older acquisition software also writes "*__target_call_coord.csv" next to this file; only the
+    # cell-assigned "complete_code_cell" file carries the CellComp column the reader requires.
+    TRANSCRIPT_SUFFIX = "complete_code_cell_target_call_coord.csv"
     INSTANCE_LABEL_PREFIX = "celllabels_f"
     COMPARTMENT_LABEL_PREFIX = "compartmentlabels_f"
 

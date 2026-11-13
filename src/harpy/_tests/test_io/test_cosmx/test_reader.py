@@ -76,7 +76,7 @@ def test_cosmx_reads_one_sample_with_sample_scoped_names_and_metadata(
     image_metadata = metadata["images"]["sample_a_morphology_image_mosaic_1"]
     assert image_metadata["sample_id"] == "sample_a"
     assert image_metadata["fovs"] == [1, 2]
-    assert image_metadata["mosaic"] == {"mode": "spatial_groups", "adjacency_tolerance_px": 1}
+    assert image_metadata["mosaic"] == {"mode": "spatial_groups", "adjacency_tolerance_px": 1, "number": 1}
     panel_names = set(metadata["feature_panels"])
     assert len(panel_names) == 1
     panel_name = panel_names.pop()
@@ -95,6 +95,7 @@ def test_cosmx_reads_one_sample_with_sample_scoped_names_and_metadata(
         ]
         assert len(records) == 4
         assert all(record["fov_bounds_px"] == bounds for record in records)
+        assert all(record["mosaic"]["number"] == mosaic for record in records)
     assert not _generated_siblings(output)
 
 
@@ -149,11 +150,13 @@ def test_cosmx_writes_two_samples_with_independent_configuration(
     assert metadata["sample_a_morphology_image_mosaic_1"]["mosaic"] == {
         "mode": "spatial_groups",
         "adjacency_tolerance_px": 0,
+        "number": 1,
     }
     assert metadata["sample_b_morphology_image_mosaic_1"]["orientation"] == {"flip_x": True, "flip_y": True}
     assert metadata["sample_b_morphology_image_mosaic_1"]["mosaic"] == {
         "mode": "single",
         "adjacency_tolerance_px": None,
+        "number": 1,
     }
 
 

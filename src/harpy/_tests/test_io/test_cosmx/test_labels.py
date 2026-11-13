@@ -71,6 +71,7 @@ def test_add_instance_labels_remaps_stitches_and_roundtrips(
         "mosaic": {
             "mode": preview.mosaic_mode,
             "adjacency_tolerance_px": preview.adjacency_tolerance_px,
+            "number": 1,
         },
         "source_origin_px": {"x": 0, "y": 0},
         "fov_bounds_px": {
