@@ -33,6 +33,16 @@ from harpy.io._cosmx._constants import (
 from harpy.io._cosmx._models import _INSTANCE_ID_DTYPE, _MOSAIC_MODES, _validate_identifier
 
 _ELEMENT_REGISTRIES = (_IMAGES_METADATA_KEY, _LABELS_METADATA_KEY, _POINTS_METADATA_KEY)
+# Record fields the reader writes once per mosaic, identical for all elements of that mosaic.
+_MOSAIC_FIELDS = (
+    "fovs",
+    "mosaic",
+    "source_origin_px",
+    _FOV_BOUNDS_KEY,
+    "orientation",
+    "pixel_size_um",
+    "acquisition_timestamp",
+)
 
 
 def validate_cosmx_store(
@@ -43,9 +53,10 @@ def validate_cosmx_store(
     """Validate a sample-aware CosMx SpatialData Zarr store without modifying it.
 
     Structural validation checks the Harpy metadata version and provenance,
-    registered element records, label-family metadata, feature-panel records
-    and referenced points schemas. It reads array and dataframe metadata but
-    does not compute raster or transcript partitions.
+    registered element records and their agreement within each mosaic,
+    label-family metadata, feature-panel records and referenced points
+    schemas. It reads array and dataframe metadata but does not compute raster
+    or transcript partitions.
 
     By default, the content check projects only the feature and feature-class
     columns from each panel-associated points element and validates each
@@ -146,7 +157,49 @@ def _validate_cosmx_sdata(
             check_point_contents=check_point_contents,
         )
     )
+    _validate_mosaic_consistency(registries)
     return frozenset(sample_ids)
+
+
+def _validate_mosaic_consistency(registries: Mapping[str, Mapping[str, Any]]) -> None:
+    """Require the element records of one mosaic to agree on their per-mosaic fields.
+
+    Downstream code pairs the image, labels and points elements of a mosaic by
+    ``(sample_id, mosaic.number)``. The reader writes the fields in
+    ``_MOSAIC_FIELDS`` once per mosaic, so all records with the same key must
+    have identical values; a record that differs claims a mosaic it does not
+    describe. The first record of each key is the reference for the others.
+    Product-specific fields, such as ``channels`` or ``feature_panel``, are not
+    compared.
+
+    Call only after every element record has been validated: this reads
+    ``sample_id`` and ``mosaic.number`` without checking them.
+
+    Examples
+    --------
+    Mosaic 1 covers FOVs 1 and 2, mosaic 2 covers FOV 3. A transcripts record
+    of mosaic 1 with the wrong number joins the group of mosaic 2 and is
+    rejected on its first differing field::
+
+        images["sample_morphology_image_mosaic_2"]  {"fovs": [3],    "mosaic": {..., "number": 2}, ...}
+        points["sample_transcripts_mosaic_1"]       {"fovs": [1, 2], "mosaic": {..., "number": 2}, ...}
+            -> ValueError: ...points['sample_transcripts_mosaic_1'].fovs differs from
+               ...images['sample_morphology_image_mosaic_2'].fovs ...
+
+    Each record is valid on its own, so the per-record checks pass it.
+    """
+    first_records: dict[tuple[str, int], tuple[str, Mapping[str, Any]]] = {}
+    for registry in _ELEMENT_REGISTRIES:
+        for element_name, record in registries[registry].items():
+            sample_id, number = record[_SAMPLE_ID_KEY], record["mosaic"]["number"]
+            path = _element_path(registry, element_name)
+            first_path, first_record = first_records.setdefault((sample_id, number), (path, record))
+            for field in _MOSAIC_FIELDS:
+                if record.get(field) != first_record.get(field):
+                    raise ValueError(
+                        f"CosMx metadata {path}.{field} differs from {first_path}.{field}, although both elements "
+                        f"are mosaic {number} of sample {sample_id!r}. Run the CosMx reader again to rewrite the store."
+                    )
 
 
 def _validate_image_records(sdata: SpatialData, registry: Mapping[str, object]) -> set[str]:
@@ -472,6 +525,14 @@ def _validate_common_element_record(
             raise ValueError(f"CosMx metadata {path}.mosaic.adjacency_tolerance_px must be None in single mode.")
     else:
         _require_nonnegative_integer(tolerance, path=f"{path}.mosaic.adjacency_tolerance_px")
+    if "number" not in mosaic:
+        raise ValueError(
+            f"CosMx metadata {path}.mosaic.number is required. Stores written by older Harpy versions lack it; "
+            "run the CosMx reader again to rewrite the store."
+        )
+    number = mosaic["number"]
+    if isinstance(number, bool) or not isinstance(number, int) or number < 1:
+        raise ValueError(f"CosMx metadata {path}.mosaic.number must be a positive integer, found {number!r}.")
 
     origin = _require_mapping(record.get("source_origin_px"), path=f"{path}.source_origin_px")
     for axis in ("x", "y"):

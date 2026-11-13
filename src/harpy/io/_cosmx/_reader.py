@@ -82,7 +82,10 @@ def cosmx(
     coordinate systems, ``<sample>_<coordinate_system>_<n>`` and
     ``<sample>_<coordinate_system>_<n>_micron``. Harpy assigns the mosaic
     numbers, not CosMx: they count from 1, in order of decreasing FOV count.
-    ``mosaic_mode`` of :class:`CosmxSample` sets how FOVs are grouped.
+    Each element also records its number ``<n>`` in the ``mosaic.number``
+    field of its metadata, so elements can be paired and named per mosaic
+    without parsing names. ``mosaic_mode`` of :class:`CosmxSample` sets how
+    FOVs are grouped.
 
     The complete output is transactional. Data are written directly into a
     temporary sibling Zarr store and published only after that store can be
@@ -151,7 +154,8 @@ def cosmx(
         │       ├── fovs: [<source FOVs>]
         │       ├── mosaic
         │       │   ├── mode: "spatial_groups" | "single"
-        │       │   └── adjacency_tolerance_px: <int> | None
+        │       │   ├── adjacency_tolerance_px: <int> | None
+        │       │   └── number: <int>
         │       ├── source_origin_px
         │       │   ├── x: <int>
         │       │   └── y: <int>
@@ -210,6 +214,11 @@ def cosmx(
     source ``OrigTimeStamp`` preserved verbatim when it is non-empty and
     consistent across all morphology TIFFs for the sample; otherwise the field
     is omitted.
+
+    ``mosaic.mode`` and ``mosaic.adjacency_tolerance_px`` are the sample's
+    grouping settings, the same for all its mosaics. ``mosaic.number`` is the
+    mosaic's ``<n>`` from the element names; the image, labels and points
+    elements of one mosaic share it.
 
     ``fov_bounds_px`` gives each FOV's tile as half-open pixel bounds
     ``[y0, y1) × [x0, x1)`` in the element's intrinsic frame at full
