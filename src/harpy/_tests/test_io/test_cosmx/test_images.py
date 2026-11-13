@@ -59,6 +59,7 @@ def test_add_morphology_images_stitches_groups_and_roundtrips(
         get_dataarray(roundtripped, "morphology_image_mosaic_1").data.compute(),
         values,
     )
+    assert roundtripped.attrs["harpy"]["images"]["morphology_image_mosaic_2"]["mosaic"]["number"] == 2
     metadata = roundtripped.attrs["harpy"]["images"]["morphology_image_mosaic_1"]
     assert metadata == {
         "fovs": [1, 2],
@@ -66,6 +67,7 @@ def test_add_morphology_images_stitches_groups_and_roundtrips(
         "mosaic": {
             "mode": preview.mosaic_mode,
             "adjacency_tolerance_px": preview.adjacency_tolerance_px,
+            "number": 1,
         },
         "source_origin_px": {"x": 0, "y": 0},
         "fov_bounds_px": {
