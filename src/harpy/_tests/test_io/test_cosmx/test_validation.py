@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -121,6 +122,65 @@ def test_validate_cosmx_store_rejects_invalid_fov_bounds(
     sdata.write_attrs()
 
     with pytest.raises(ValueError, match=message):
+        validate_cosmx_store(reader_store)
+
+
+def test_validate_cosmx_store_requires_mosaic_number(reader_store: Path) -> None:
+    sdata = read_zarr(reader_store)
+    attrs = deepcopy(sdata.attrs)
+    del attrs["harpy"]["images"]["sample_morphology_image_mosaic_1"]["mosaic"]["number"]
+    sdata.attrs = attrs
+    sdata.write_attrs()
+
+    with pytest.raises(ValueError, match=r"mosaic\.number is required\. .*run the CosMx reader again"):
+        validate_cosmx_store(reader_store)
+
+
+@pytest.mark.parametrize("number", [0, -1, True, "1", 1.0])
+def test_validate_cosmx_store_rejects_invalid_mosaic_number(reader_store: Path, number: object) -> None:
+    sdata = read_zarr(reader_store)
+    attrs = deepcopy(sdata.attrs)
+    attrs["harpy"]["images"]["sample_morphology_image_mosaic_1"]["mosaic"]["number"] = number
+    sdata.attrs = attrs
+    sdata.write_attrs()
+
+    with pytest.raises(ValueError, match=re.escape(f"mosaic.number must be a positive integer, found {number!r}.")):
+        validate_cosmx_store(reader_store)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        (
+            "source_origin",
+            "harpy.labels['sample_instance_labels_mosaic_1'].source_origin_px differs from "
+            "harpy.images['sample_morphology_image_mosaic_1'].source_origin_px, although both elements are "
+            "mosaic 1 of sample 'sample'.",
+        ),
+        (
+            "number",
+            "harpy.labels['sample_instance_labels_mosaic_1'].fovs differs from "
+            "harpy.images['sample_morphology_image_mosaic_2'].fovs, although both elements are "
+            "mosaic 2 of sample 'sample'.",
+        ),
+    ],
+)
+def test_validate_cosmx_store_rejects_disagreeing_mosaic_records(
+    reader_store: Path,
+    mutation: str,
+    message: str,
+) -> None:
+    sdata = read_zarr(reader_store)
+    attrs = deepcopy(sdata.attrs)
+    record = attrs["harpy"]["labels"]["sample_instance_labels_mosaic_1"]
+    if mutation == "source_origin":
+        record["source_origin_px"]["x"] += 1
+    else:
+        record["mosaic"]["number"] = 2
+    sdata.attrs = attrs
+    sdata.write_attrs()
+
+    with pytest.raises(ValueError, match=re.escape(message)):
         validate_cosmx_store(reader_store)
 
 
@@ -319,7 +379,7 @@ def _write_points_store(
     point_metadata = {
         "sample_id": "sample",
         "fovs": [1],
-        "mosaic": {"mode": "spatial_groups", "adjacency_tolerance_px": 0},
+        "mosaic": {"mode": "spatial_groups", "adjacency_tolerance_px": 0, "number": 1},
         "source_origin_px": {"x": 0, "y": 0},
         "fov_bounds_px": {"1": {"y0": 0, "x0": 0, "y1": 8, "x1": 8}},
         "orientation": {"flip_x": True, "flip_y": False},
