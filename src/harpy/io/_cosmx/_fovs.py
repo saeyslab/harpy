@@ -8,8 +8,8 @@ from spatialdata import SpatialData
 from spatialdata.models import TableModel, get_table_keys
 from spatialdata.transformations import Identity, get_transformation, get_transformation_between_coordinate_systems
 
-from harpy._metadata import _HARPY_METADATA_KEY, _IMAGES_METADATA_KEY
 from harpy.io._cosmx._constants import _FOV_BOUNDS_KEY, _SAMPLE_ID_KEY
+from harpy.metadata._registry import _HARPY_METADATA_KEY, _IMAGES_METADATA_KEY
 from harpy.table.canonical_centers import CANONICAL_OBSM_KEY
 
 

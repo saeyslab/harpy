@@ -12,7 +12,6 @@ from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
 from spatialdata.transformations import Identity, Scale
 
-from harpy._metadata import _LABELS_METADATA_KEY, _validate_metadata_destination
 from harpy.image._image import add_labels
 from harpy.io._cosmx._constants import _COMPARTMENT_CATEGORIES, _INSTANCE_ID_FORMULA
 from harpy.io._cosmx._metadata import _commit_element_metadata, _common_element_record
@@ -27,6 +26,7 @@ from harpy.io._cosmx._models import (
 )
 from harpy.io._cosmx._names import _element_name, _micron_coordinate_system, _pixel_coordinate_system
 from harpy.io._cosmx._raster import _assemble_raster
+from harpy.metadata._registry import _LABELS_METADATA_KEY, _validate_metadata_destination
 
 _DEFAULT_CHUNKS = (1024, 1024)
 _LabelFamily = Literal["instance_labels", "compartment_labels"]

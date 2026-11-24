@@ -12,16 +12,6 @@ from spatialdata import SpatialData, read_zarr
 from xarray import DataArray
 
 from harpy._feature_panels import _FeaturePanelContract
-from harpy._metadata import (
-    _FEATURE_PANELS_METADATA_KEY,
-    _HARPY_METADATA_KEY,
-    _IMAGES_METADATA_KEY,
-    _LABELS_METADATA_KEY,
-    _METADATA_VERSION,
-    _METADATA_VERSION_KEY,
-    _POINTS_METADATA_KEY,
-    _PROVENANCE_METADATA_KEY,
-)
 from harpy.image._image import get_dataarray
 from harpy.io._cosmx._constants import (
     _COMPARTMENT_CATEGORIES,
@@ -31,6 +21,16 @@ from harpy.io._cosmx._constants import (
     _SAMPLE_ID_KEY,
 )
 from harpy.io._cosmx._models import _INSTANCE_ID_DTYPE, _MOSAIC_MODES, _validate_identifier
+from harpy.metadata._registry import (
+    _FEATURE_PANELS_METADATA_KEY,
+    _HARPY_METADATA_KEY,
+    _IMAGES_METADATA_KEY,
+    _LABELS_METADATA_KEY,
+    _METADATA_VERSION,
+    _METADATA_VERSION_KEY,
+    _POINTS_METADATA_KEY,
+    _PROVENANCE_METADATA_KEY,
+)
 
 _ELEMENT_REGISTRIES = (_IMAGES_METADATA_KEY, _LABELS_METADATA_KEY, _POINTS_METADATA_KEY)
 # Record fields the reader writes once per mosaic, identical for all elements of that mosaic.

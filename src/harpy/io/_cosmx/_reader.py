@@ -17,7 +17,6 @@ from harpy._feature_panels import (
     _parse_feature_panel_registry,
     _validate_feature_panel_collision,
 )
-from harpy._metadata import _FEATURE_PANELS_METADATA_KEY, _HARPY_METADATA_KEY, _PROVENANCE_METADATA_KEY
 from harpy.io._cosmx._discovery import _discover_cosmx
 from harpy.io._cosmx._images import _add_morphology_images, _select_channels
 from harpy.io._cosmx._labels import _add_compartment_labels, _add_instance_labels
@@ -39,6 +38,7 @@ from harpy.io._cosmx._names import (
 from harpy.io._cosmx._preview import _preview_cosmx
 from harpy.io._cosmx._transcripts import _add_transcript_points
 from harpy.io._cosmx._validation import _validate_cosmx_sdata
+from harpy.metadata._registry import _FEATURE_PANELS_METADATA_KEY, _HARPY_METADATA_KEY, _PROVENANCE_METADATA_KEY
 
 
 @dataclass(frozen=True)

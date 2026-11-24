@@ -10,7 +10,7 @@ import pandas as pd
 from dask.dataframe import DataFrame as DaskDataFrame
 from spatialdata import SpatialData
 
-from harpy._metadata import (
+from harpy.metadata._registry import (
     _FEATURE_PANELS_METADATA_KEY,
     _HARPY_METADATA_KEY,
     _METADATA_VERSION,

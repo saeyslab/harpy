@@ -13,15 +13,15 @@ from spatialdata import SpatialData
 from spatialdata.transformations import Identity, Scale
 
 from harpy._feature_panels import _parse_feature_panel_registry, _validate_feature_panel_collision
-from harpy._metadata import (
+from harpy.io._cosmx._metadata import _commit_element_metadata, _common_element_record
+from harpy.io._cosmx._models import _CosmxPreview
+from harpy.io._cosmx._names import _element_name, _micron_coordinate_system, _pixel_coordinate_system
+from harpy.metadata._registry import (
     _FEATURE_PANELS_METADATA_KEY,
     _HARPY_METADATA_KEY,
     _POINTS_METADATA_KEY,
     _validate_metadata_destination,
 )
-from harpy.io._cosmx._metadata import _commit_element_metadata, _common_element_record
-from harpy.io._cosmx._models import _CosmxPreview
-from harpy.io._cosmx._names import _element_name, _micron_coordinate_system, _pixel_coordinate_system
 from harpy.points._points import add_points
 
 _SOURCE_COLUMNS = ("V1", "CellComp", "codeclass", "target", "x", "y", "z")

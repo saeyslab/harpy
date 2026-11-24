@@ -6,14 +6,14 @@ from copy import deepcopy
 from loguru import logger as log
 from spatialdata import SpatialData
 
-from harpy._metadata import (
+from harpy.io._cosmx._constants import _FOV_BOUNDS_KEY, _SAMPLE_ID_KEY
+from harpy.io._cosmx._models import _CosmxMosaicGeometry, _CosmxPreview
+from harpy.metadata._registry import (
     _FEATURE_PANELS_METADATA_KEY,
     _PROVENANCE_METADATA_KEY,
     _harpy_metadata,
     _metadata_registry,
 )
-from harpy.io._cosmx._constants import _FOV_BOUNDS_KEY, _SAMPLE_ID_KEY
-from harpy.io._cosmx._models import _CosmxMosaicGeometry, _CosmxPreview
 
 
 def _common_element_record(
