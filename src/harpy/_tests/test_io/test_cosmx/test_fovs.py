@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from pathlib import Path
 
+import anndata
 import numpy as np
 import pandas as pd
 import pytest
@@ -67,13 +68,21 @@ def test_assign_cosmx_fovs_matches_the_instance_id_encoding_across_samples(cosmx
     assign_cosmx_fovs(cosmx_table, table_name="table")
 
     obs = cosmx_table.tables["table"].obs
-    assert obs["fov"].dtype == pd.Int64Dtype()
-    assert isinstance(obs["sample_id"].dtype, pd.CategoricalDtype)
+    for key in ("fov", "sample_id", "mosaic"):
+        assert isinstance(obs[key].dtype, pd.CategoricalDtype)
+        assert not obs[key].cat.ordered
+    # Every FOV of the table's mosaics is a category, in numeric order, across samples.
+    assert obs["fov"].cat.categories.tolist() == [1, 2, 3]
     base = next(iter(cosmx_table.attrs["harpy"]["labels"].values()))["instance_id_encoding"]["base"]
     expected_fov = obs["cell_ID"].to_numpy().astype(np.int64) // base + 1
-    np.testing.assert_array_equal(obs["fov"].to_numpy(dtype=np.int64), expected_fov)
+    np.testing.assert_array_equal(obs["fov"].astype(np.int64).to_numpy(), expected_fov)
     expected_sample = obs["region"].astype(str).str.split("_instance_labels").str[0]
     assert obs["sample_id"].astype(str).tolist() == expected_sample.tolist()
+    # Sample a has two mosaics; each row gets the mosaic of its mask.
+    expected_mosaic = obs["region"].astype(str).str.rsplit("_", n=1).str[1].astype(int)
+    assert obs["mosaic"].astype(int).tolist() == expected_mosaic.tolist()
+    assert obs["mosaic"].cat.categories.tolist() == [1, 2]
+    assert {("sample_a", 1), ("sample_a", 2)} <= set(zip(obs["sample_id"], obs["mosaic"], strict=True))
     # FOV numbers repeat across samples; the sample tells them apart.
     assert {("sample_a", 2), ("sample_b", 2)} <= set(zip(obs["sample_id"], obs["fov"], strict=True))
 
@@ -99,6 +108,7 @@ def test_assign_cosmx_fovs_follows_a_mask_segmented_on_a_crop(cosmx_table: Spati
 
     assert fov_2_centers[:, 2].tolist() == [5.5]
     assert sdata.tables["table"].obs["fov"].tolist() == [2]
+    assert sdata.tables["table"].obs["mosaic"].tolist() == [1]
 
 
 def test_assign_cosmx_fovs_follows_a_rescaled_mask(cosmx_table: SpatialData) -> None:
@@ -136,11 +146,34 @@ def test_assign_cosmx_fovs_leaves_centers_outside_every_fov_unassigned(cosmx_tab
         centers=np.array([[0.0, 1.5, 1.5], [0.0, 1.5, 100.0]]),
     )
 
-    assign_cosmx_fovs(sdata, table_name="table", fov_key="cosmx_fov", sample_key="cosmx_sample")
+    assign_cosmx_fovs(
+        sdata, table_name="table", fov_key="cosmx_fov", sample_key="cosmx_sample", mosaic_key="cosmx_mosaic"
+    )
 
     obs = sdata.tables["table"].obs
-    assert obs["cosmx_fov"].tolist() == [1, pd.NA]
+    assert obs["cosmx_fov"].isna().tolist() == [False, True]
+    assert obs["cosmx_fov"].iloc[0] == 1
+    # Every FOV of the mask's mosaic is a category, also FOV 2, which has no rows.
+    assert obs["cosmx_fov"].cat.categories.tolist() == [1, 2]
+    # A row outside every FOV keeps its sample and mosaic.
     assert obs["cosmx_sample"].tolist() == ["sample_a", "sample_a"]
+    assert obs["cosmx_mosaic"].tolist() == [1, 1]
+
+
+def test_assign_cosmx_fovs_columns_survive_a_zarr_round_trip(cosmx_table: SpatialData, tmp_path: Path) -> None:
+    sdata = _one_mask(
+        cosmx_table,
+        "sample_a_instance_labels_mosaic_1",
+        centers=np.array([[0.0, 1.5, 1.5], [0.0, 1.5, 100.0]]),
+    )
+    assign_cosmx_fovs(sdata, table_name="table")
+    path = tmp_path / "table.zarr"
+
+    sdata.tables["table"].write_zarr(path)
+
+    columns = ["fov", "sample_id", "mosaic"]
+    # Integer categories, the category of FOV 2 without rows, and the missing FOV all survive.
+    pd.testing.assert_frame_equal(anndata.read_zarr(path).obs[columns], sdata.tables["table"].obs[columns])
 
 
 @pytest.mark.parametrize(
@@ -151,6 +184,8 @@ def test_assign_cosmx_fovs_leaves_centers_outside_every_fov_unassigned(cosmx_tab
         ("no_recorded_coordinate_system", "has no transformation to a coordinate system recorded in"),
         ("two_recorded_coordinate_systems", "several coordinate systems with Harpy metadata"),
         ("region_column", "would replace the region or instance column"),
+        ("mosaic_region_column", "would replace the region or instance column"),
+        ("shared_key", "fov_key, sample_key and mosaic_key must differ"),
     ],
 )
 def test_assign_cosmx_fovs_rejects_invalid_input_without_changing_the_table(
@@ -174,10 +209,17 @@ def test_assign_cosmx_fovs_rejects_invalid_input_without_changing_the_table(
         del table.obsm["spatial_canonical"]
     if case == "no_registry":
         del sdata.attrs["harpy"]["coordinate_systems"]
+    keys = {"fov_key": "fov", "sample_key": "sample_id", "mosaic_key": "mosaic"}
+    if case == "region_column":
+        keys["fov_key"] = "region"
+    elif case == "mosaic_region_column":
+        keys["mosaic_key"] = "region"
+    elif case == "shared_key":
+        keys["mosaic_key"] = "fov"
     before = table.obs.copy()
 
     with pytest.raises(ValueError, match=message):
-        assign_cosmx_fovs(sdata, table_name="table", fov_key="region" if case == "region_column" else "fov")
+        assign_cosmx_fovs(sdata, table_name="table", **keys)
 
     pd.testing.assert_frame_equal(table.obs, before)
 
