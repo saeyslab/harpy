@@ -59,8 +59,8 @@ class CosmxSample:
         reader default. The value is normalized to ``None`` in single-mosaic
         mode because adjacency grouping is not performed.
     coordinate_system
-        Base name for this sample's independent pixel and micron coordinate
-        systems. It must match ``^[A-Za-z][A-Za-z0-9_]*$``.
+        Base name for this sample's coordinate systems, one per mosaic, in
+        pixels. It must match ``^[A-Za-z][A-Za-z0-9_]*$``.
     flip_x, flip_y
         Local-axis orientation applied consistently to the sample's rasters
         and transcript coordinates.
