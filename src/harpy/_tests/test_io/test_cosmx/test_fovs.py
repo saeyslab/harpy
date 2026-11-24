@@ -9,11 +9,10 @@ import pytest
 from anndata import AnnData
 from spatialdata import SpatialData, read_zarr
 from spatialdata.models import TableModel
-from spatialdata.transformations import Identity, Scale, Sequence, Translation, set_transformation
+from spatialdata.transformations import Identity, Scale, Translation, set_transformation
 
 from harpy.image._image import get_dataarray
 from harpy.io import CosmxSample, assign_cosmx_fovs, cosmx
-from harpy.io._cosmx._fovs import _cosmx_image_of
 from harpy.table import add_canonical_centers
 
 
@@ -89,14 +88,9 @@ def test_assign_cosmx_fovs_follows_a_mask_segmented_on_a_crop(cosmx_table: Spati
     offset_x = 8
     fov_2_centers = centers[centers[:, 2] > offset_x] - [0, 0, offset_x]
     cropped_labels = deepcopy(cosmx_table[labels])
-    translation = Translation([offset_x, 0], axes=("x", "y"))
-    pixel_size = cosmx_table.attrs["harpy"]["labels"][labels]["pixel_size_um"]
     set_transformation(
         cropped_labels,
-        {
-            "sample_a_global_1": translation,
-            "sample_a_global_1_micron": Sequence([translation, Scale([pixel_size, pixel_size], axes=("x", "y"))]),
-        },
+        {"sample_a_global_1": Translation([offset_x, 0], axes=("x", "y")), "aligned": Identity()},
         set_all=True,
     )
     sdata = _one_mask(cosmx_table, labels, labels_element=cropped_labels, centers=fov_2_centers)
@@ -107,23 +101,32 @@ def test_assign_cosmx_fovs_follows_a_mask_segmented_on_a_crop(cosmx_table: Spati
     assert sdata.tables["table"].obs["fov"].tolist() == [2]
 
 
-def test_cosmx_image_of_goes_through_the_image_pixel_grid(cosmx_table: SpatialData) -> None:
+def test_assign_cosmx_fovs_follows_a_rescaled_mask(cosmx_table: SpatialData) -> None:
     labels = "sample_a_instance_labels_mosaic_1"
-    image = "sample_a_morphology_image_mosaic_1"
-    # The physical coordinate system sorts first by name: the pixel grid must be chosen by its
-    # identity transformation, not by name.
-    transformations = {"pixels": Identity(), "a_micron": Scale([0.5, 0.5], axes=("x", "y"))}
-    elements = {}
-    for name in (image, labels):
-        elements[name] = deepcopy(cosmx_table[name])
-        set_transformation(elements[name], transformations, set_all=True)
-    sdata = SpatialData(
-        images={image: elements[image]},
-        labels={labels: elements[labels]},
-        attrs=deepcopy(cosmx_table.attrs),
-    )
+    expected = _one_mask(cosmx_table, labels)
+    assign_cosmx_fovs(expected, table_name="table")
+    # A mask at half the resolution of the image: its centers are halved, and its transformation doubles them.
+    centers = np.asarray(expected.tables["table"].obsm["spatial_canonical"]) / [1, 2, 2]
+    rescaled_labels = deepcopy(cosmx_table[labels])
+    set_transformation(rescaled_labels, {"sample_a_global_1": Scale([2.0, 2.0], axes=("x", "y"))}, set_all=True)
+    sdata = _one_mask(cosmx_table, labels, labels_element=rescaled_labels, centers=centers)
 
-    assert _cosmx_image_of(sdata, labels, image_records=sdata.attrs["harpy"]["images"]) == (image, "pixels")
+    assign_cosmx_fovs(sdata, table_name="table")
+
+    assert sdata.tables["table"].obs["fov"].tolist() == expected.tables["table"].obs["fov"].tolist()
+    assert set(sdata.tables["table"].obs["fov"]) == {1, 2}
+
+
+def test_assign_cosmx_fovs_needs_no_morphology_image(cosmx_table: SpatialData) -> None:
+    labels = "sample_a_instance_labels_mosaic_1"
+    with_image = _one_mask(cosmx_table, labels)
+    without_image = _one_mask(cosmx_table, labels, with_image=False)
+    assert not without_image.images
+
+    assign_cosmx_fovs(with_image, table_name="table")
+    assign_cosmx_fovs(without_image, table_name="table")
+
+    pd.testing.assert_frame_equal(without_image.tables["table"].obs, with_image.tables["table"].obs)
 
 
 def test_assign_cosmx_fovs_leaves_centers_outside_every_fov_unassigned(cosmx_table: SpatialData) -> None:
@@ -144,7 +147,9 @@ def test_assign_cosmx_fovs_leaves_centers_outside_every_fov_unassigned(cosmx_tab
     ("case", "message"),
     [
         ("no_centers", "add_canonical_centers"),
-        ("no_shared_coordinate_system", "must share a coordinate system with exactly one CosMx morphology image"),
+        ("no_registry", "records no coordinate systems"),
+        ("no_recorded_coordinate_system", "has no transformation to a coordinate system recorded in"),
+        ("two_recorded_coordinate_systems", "several coordinate systems with Harpy metadata"),
         ("region_column", "would replace the region or instance column"),
     ],
 )
@@ -155,13 +160,20 @@ def test_assign_cosmx_fovs_rejects_invalid_input_without_changing_the_table(
 ) -> None:
     labels = "sample_a_instance_labels_mosaic_1"
     labels_element = None
-    if case == "no_shared_coordinate_system":
+    if case in ("no_recorded_coordinate_system", "two_recorded_coordinate_systems"):
         labels_element = deepcopy(cosmx_table[labels])
-        set_transformation(labels_element, {"other": Identity()}, set_all=True)
+        transformations = (
+            {"other": Identity()}
+            if case == "no_recorded_coordinate_system"
+            else {"sample_a_global_1": Identity(), "sample_a_global_2": Identity()}
+        )
+        set_transformation(labels_element, transformations, set_all=True)
     sdata = _one_mask(cosmx_table, labels, labels_element=labels_element)
     table = sdata.tables["table"]
     if case == "no_centers":
         del table.obsm["spatial_canonical"]
+    if case == "no_registry":
+        del sdata.attrs["harpy"]["coordinate_systems"]
     before = table.obs.copy()
 
     with pytest.raises(ValueError, match=message):
@@ -176,10 +188,11 @@ def _one_mask(
     *,
     labels_element: object | None = None,
     centers: np.ndarray | None = None,
+    with_image: bool = True,
 ) -> SpatialData:
     """Return one mask of ``source`` and its mosaic's morphology image, with an in-memory table over the mask.
 
-    The records of ``source`` are kept, so the result is a partial store: most registered images are missing.
+    The records of ``source`` are kept, so the result is a partial store: most recorded elements are missing.
     """
     table = source.tables["table"]
     rows = (table.obs["region"] == labels).to_numpy()
@@ -200,7 +213,7 @@ def _one_mask(
     )
     image = labels.replace("instance_labels", "morphology_image")
     return SpatialData(
-        images={image: source[image]},
+        images={image: source[image]} if with_image else {},
         labels={labels: source[labels] if labels_element is None else labels_element},
         tables={"table": adata},
         attrs=deepcopy(source.attrs),
