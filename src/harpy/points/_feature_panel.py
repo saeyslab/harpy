@@ -17,13 +17,13 @@ from harpy._feature_panels import (
     _parse_feature_panel_registry,
     _validate_feature_panel_collision,
 )
-from harpy._metadata import (
+from harpy._storage._spatialdata import _replace_element_on_disk
+from harpy.metadata._registry import (
     _FEATURE_PANELS_METADATA_KEY,
     _POINTS_METADATA_KEY,
     _metadata_registry,
     _validate_metadata_destination,
 )
-from harpy._storage._spatialdata import _replace_element_on_disk
 
 
 def add_feature_panel(
