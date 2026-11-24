@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 from dask.dataframe import DataFrame as DaskDataFrame
 from spatialdata import SpatialData, read_zarr
+from spatialdata.transformations import Identity, get_transformation
 from xarray import DataArray
 
 from harpy._feature_panels import _FeaturePanelContract
@@ -18,31 +19,27 @@ from harpy.io._cosmx._constants import (
     _FOV_BOUNDS_FIELDS,
     _FOV_BOUNDS_KEY,
     _INSTANCE_ID_FORMULA,
-    _SAMPLE_ID_KEY,
 )
 from harpy.io._cosmx._models import _INSTANCE_ID_DTYPE, _MOSAIC_MODES, _validate_identifier
 from harpy.metadata._registry import (
+    _COORDINATE_SYSTEMS_METADATA_KEY,
     _FEATURE_PANELS_METADATA_KEY,
     _HARPY_METADATA_KEY,
     _IMAGES_METADATA_KEY,
     _LABELS_METADATA_KEY,
     _METADATA_VERSION,
     _METADATA_VERSION_KEY,
+    _MICRONS_PER_UNIT_KEY,
+    _MOSAIC_KEY,
     _POINTS_METADATA_KEY,
     _PROVENANCE_METADATA_KEY,
+    _SAMPLE_ID_KEY,
 )
 
 _ELEMENT_REGISTRIES = (_IMAGES_METADATA_KEY, _LABELS_METADATA_KEY, _POINTS_METADATA_KEY)
-# Record fields the reader writes once per mosaic, identical for all elements of that mosaic.
-_MOSAIC_FIELDS = (
-    "fovs",
-    "mosaic",
-    "source_origin_px",
-    _FOV_BOUNDS_KEY,
-    "orientation",
-    "pixel_size_um",
-    "acquisition_timestamp",
-)
+# Fields of a coordinate-system record that describe the run of its sample, the same in each coordinate
+# system of that sample.
+_RUN_FIELDS = (_MICRONS_PER_UNIT_KEY, "orientation", "mosaic_grouping", "acquisition_timestamp")
 
 
 def validate_cosmx_store(
@@ -52,11 +49,13 @@ def validate_cosmx_store(
 ) -> None:
     """Validate a sample-aware CosMx SpatialData Zarr store without modifying it.
 
-    Structural validation checks the Harpy metadata version and provenance,
-    registered element records and their agreement within each mosaic,
-    label-family metadata, feature-panel records and referenced points
-    schemas. It reads array and dataframe metadata but does not compute raster
-    or transcript partitions.
+    Structural validation checks the Harpy metadata version and provenance;
+    the record of each mosaic's coordinate system, and the agreement of the
+    records of one sample; that each recorded image and labels element lies
+    unscaled in exactly one recorded coordinate system, within whose FOV
+    bounds it extends; label-family metadata; feature-panel records; and
+    referenced points schemas. It reads array and dataframe metadata but does
+    not compute raster or transcript partitions.
 
     By default, the content check projects only the feature and feature-class
     columns from each panel-associated points element and validates each
@@ -85,8 +84,10 @@ def validate_cosmx_store(
     Notes
     -----
     This function never writes attributes or elements and does not repair or
-    migrate invalid stores. Unregistered downstream-analysis elements are
-    permitted, but they do not establish CosMx sample identity.
+    migrate invalid stores. Elements without a record, such as downstream
+    segmentations, are permitted and not checked. A points record needs no
+    coordinate system, so the record that :func:`harpy.pt.add_feature_panel`
+    writes for another points element is valid.
     """
     if not isinstance(check_point_contents, bool):
         raise ValueError(f"CosMx check_point_contents must be a bool, found {check_point_contents!r}.")
@@ -106,7 +107,7 @@ def _validate_cosmx_sdata(
     *,
     check_point_contents: bool = True,
 ) -> frozenset[str]:
-    """Validate an opened store and return its element-declared sample IDs."""
+    """Validate an opened store and return the sample IDs of its coordinate-system records."""
     if not isinstance(check_point_contents, bool):
         raise ValueError(f"CosMx check_point_contents must be a bool, found {check_point_contents!r}.")
     if not isinstance(sdata, SpatialData) or not sdata.is_backed():
@@ -140,76 +141,91 @@ def _validate_cosmx_sdata(
             harpy_metadata.get(registry),
             path=f"{_HARPY_METADATA_KEY}.{registry}",
         )
-        for registry in (*_ELEMENT_REGISTRIES, _FEATURE_PANELS_METADATA_KEY)
+        for registry in (_COORDINATE_SYSTEMS_METADATA_KEY, *_ELEMENT_REGISTRIES, _FEATURE_PANELS_METADATA_KEY)
     }
-    if not any(registries[registry] for registry in _ELEMENT_REGISTRIES):
-        raise ValueError("CosMx metadata must register at least one image, labels, or points element.")
-
-    panels = _validate_feature_panels(registries[_FEATURE_PANELS_METADATA_KEY])
-    sample_ids: set[str] = set()
-    sample_ids.update(_validate_image_records(sdata, registries[_IMAGES_METADATA_KEY]))
-    sample_ids.update(_validate_labels_records(sdata, registries[_LABELS_METADATA_KEY]))
-    sample_ids.update(
-        _validate_points_records(
-            sdata,
-            registries[_POINTS_METADATA_KEY],
-            panels=panels,
-            check_point_contents=check_point_contents,
+    coordinate_systems = registries[_COORDINATE_SYSTEMS_METADATA_KEY]
+    if not coordinate_systems:
+        raise ValueError(
+            f"CosMx metadata {_HARPY_METADATA_KEY}.{_COORDINATE_SYSTEMS_METADATA_KEY} must record at least one "
+            "coordinate system. Stores written by older Harpy versions lack it; run the CosMx reader again to "
+            "rewrite the store."
         )
+
+    sample_ids = _validate_coordinate_system_records(sdata, coordinate_systems)
+    panels = _validate_feature_panels(registries[_FEATURE_PANELS_METADATA_KEY])
+    _validate_image_records(sdata, registries[_IMAGES_METADATA_KEY], coordinate_systems=coordinate_systems)
+    _validate_labels_records(sdata, registries[_LABELS_METADATA_KEY], coordinate_systems=coordinate_systems)
+    _validate_points_records(
+        sdata,
+        registries[_POINTS_METADATA_KEY],
+        panels=panels,
+        check_point_contents=check_point_contents,
     )
-    _validate_mosaic_consistency(registries)
     return frozenset(sample_ids)
 
 
-def _validate_mosaic_consistency(registries: Mapping[str, Mapping[str, Any]]) -> None:
-    """Require the element records of one mosaic to agree on their per-mosaic fields.
+def _validate_coordinate_system_records(sdata: SpatialData, records: Mapping[str, object]) -> set[str]:
+    """Validate the record of each mosaic's coordinate system and their agreement; return the sample IDs.
 
-    Downstream code pairs the image, labels and points elements of a mosaic by
-    ``(sample_id, mosaic.number)``. The reader writes the fields in
-    ``_MOSAIC_FIELDS`` once per mosaic, so all records with the same key must
-    have identical values; a record that differs claims a mosaic it does not
-    describe. The first record of each key is the reference for the others.
-    Product-specific fields, such as ``channels`` or ``feature_panel``, are not
-    compared.
-
-    Call only after every element record has been validated: this reads
-    ``sample_id`` and ``mosaic.number`` without checking them.
+    Each record must name a coordinate system of ``sdata``. A mosaic has one
+    coordinate system, so ``(sample_id, mosaic)`` is unique across the records.
+    The facts of a run, ``_RUN_FIELDS``, are the same in each coordinate system
+    of its sample; the first record of a sample is the reference for the others.
 
     Examples
     --------
-    Mosaic 1 covers FOVs 1 and 2, mosaic 2 covers FOV 3. A transcripts record
-    of mosaic 1 with the wrong number joins the group of mosaic 2 and is
-    rejected on its first differing field::
+    Two records of sample ``s1`` with different pixel sizes are each valid on
+    their own, but disagree on a fact of the run::
 
-        images["sample_morphology_image_mosaic_2"]  {"fovs": [3],    "mosaic": {..., "number": 2}, ...}
-        points["sample_transcripts_mosaic_1"]       {"fovs": [1, 2], "mosaic": {..., "number": 2}, ...}
-            -> ValueError: ...points['sample_transcripts_mosaic_1'].fovs differs from
-               ...images['sample_morphology_image_mosaic_2'].fovs ...
-
-    Each record is valid on its own, so the per-record checks pass it.
+        coordinate_systems["s1_global_1"]  {"sample_id": "s1", "mosaic": 1, "microns_per_unit": 0.12, ...}
+        coordinate_systems["s1_global_2"]  {"sample_id": "s1", "mosaic": 2, "microns_per_unit": 0.18, ...}
+            -> ValueError: ...coordinate_systems['s1_global_2'].microns_per_unit differs from
+               ...coordinate_systems['s1_global_1'].microns_per_unit ...
     """
-    first_records: dict[tuple[str, int], tuple[str, Mapping[str, Any]]] = {}
-    for registry in _ELEMENT_REGISTRIES:
-        for element_name, record in registries[registry].items():
-            sample_id, number = record[_SAMPLE_ID_KEY], record["mosaic"]["number"]
-            path = _element_path(registry, element_name)
-            first_path, first_record = first_records.setdefault((sample_id, number), (path, record))
-            for field in _MOSAIC_FIELDS:
-                if record.get(field) != first_record.get(field):
-                    raise ValueError(
-                        f"CosMx metadata {path}.{field} differs from {first_path}.{field}, although both elements "
-                        f"are mosaic {number} of sample {sample_id!r}. Run the CosMx reader again to rewrite the store."
-                    )
+    existing_coordinate_systems = set(sdata.coordinate_systems)
+    coordinate_system_of_mosaic: dict[tuple[str, int], str] = {}
+    first_of_sample: dict[str, tuple[str, Mapping[str, Any]]] = {}
+    for name, value in records.items():
+        path = _coordinate_system_path(name)
+        record = _require_mapping(value, path=path)
+        if name not in existing_coordinate_systems:
+            raise ValueError(
+                f"CosMx metadata {path} records coordinate system {name!r}, to which no element of sdata has a "
+                "transformation. Restore the elements of that mosaic, or run the CosMx reader again to rewrite the "
+                "store."
+            )
+        sample_id, mosaic = _validate_coordinate_system_record(record, path=path)
+        other = coordinate_system_of_mosaic.setdefault((sample_id, mosaic), name)
+        if other != name:
+            raise ValueError(
+                f"CosMx metadata {path} and {_coordinate_system_path(other)} both record mosaic {mosaic} of sample "
+                f"{sample_id!r}, which has one coordinate system. Run the CosMx reader again to rewrite the store."
+            )
+        first_name, first_record = first_of_sample.setdefault(sample_id, (name, record))
+        for field in _RUN_FIELDS:
+            if record.get(field) != first_record.get(field):
+                raise ValueError(
+                    f"CosMx metadata {path}.{field} differs from {_coordinate_system_path(first_name)}.{field}, "
+                    f"although both are coordinate systems of sample {sample_id!r}. Run the CosMx reader again to "
+                    "rewrite the store."
+                )
+    return set(first_of_sample)
 
 
-def _validate_image_records(sdata: SpatialData, registry: Mapping[str, object]) -> set[str]:
-    sample_ids: set[str] = set()
+def _validate_image_records(
+    sdata: SpatialData,
+    registry: Mapping[str, object],
+    *,
+    coordinate_systems: Mapping[str, Mapping[str, Any]],
+) -> None:
     for element_name, value in registry.items():
         path = _element_path(_IMAGES_METADATA_KEY, element_name)
         _require_registered_element(sdata.images, element_name, element_type="image", path=path)
         record = _require_mapping(value, path=path)
         array = get_dataarray(sdata, element_name)
-        sample_ids.add(_validate_common_element_record(record, path=path, raster_shape=_raster_shape(array)))
+        _validate_raster_placement(
+            sdata, element_name, raster_shape=_raster_shape(array), coordinate_systems=coordinate_systems
+        )
 
         channels = record.get("channels")
         if not isinstance(channels, list) or not channels:
@@ -243,17 +259,22 @@ def _validate_image_records(sdata: SpatialData, registry: Mapping[str, object]) 
                 f"CosMx metadata {path}.channels output coordinates {output_coordinates} "
                 f"do not match image coordinates {actual_coordinates}."
             )
-    return sample_ids
 
 
-def _validate_labels_records(sdata: SpatialData, registry: Mapping[str, object]) -> set[str]:
-    sample_ids: set[str] = set()
+def _validate_labels_records(
+    sdata: SpatialData,
+    registry: Mapping[str, object],
+    *,
+    coordinate_systems: Mapping[str, Mapping[str, Any]],
+) -> None:
     for element_name, value in registry.items():
         path = _element_path(_LABELS_METADATA_KEY, element_name)
         _require_registered_element(sdata.labels, element_name, element_type="labels", path=path)
         record = _require_mapping(value, path=path)
         array = get_dataarray(sdata, element_name)
-        sample_ids.add(_validate_common_element_record(record, path=path, raster_shape=_raster_shape(array)))
+        _validate_raster_placement(
+            sdata, element_name, raster_shape=_raster_shape(array), coordinate_systems=coordinate_systems
+        )
 
         has_instance_encoding = "instance_id_encoding" in record
         has_categories = "categories" in record
@@ -292,7 +313,45 @@ def _validate_labels_records(sdata: SpatialData, registry: Mapping[str, object])
                     f"CosMx compartment-label element {element_name!r} must use an unsigned integer dtype, "
                     f"found {array.dtype}."
                 )
-    return sample_ids
+
+
+def _validate_raster_placement(
+    sdata: SpatialData,
+    element_name: str,
+    *,
+    raster_shape: tuple[int, int],
+    coordinate_systems: Mapping[str, Mapping[str, Any]],
+) -> None:
+    """Require a recorded image or labels element to lie unscaled in one recorded coordinate system.
+
+    :func:`harpy.io.cosmx` writes each raster with an ``Identity`` to its
+    mosaic's coordinate system, and no transformation to another recorded one,
+    so the ``fov_bounds`` of that coordinate system are in the raster's
+    intrinsic frame and must lie within its scale-0 ``(y, x)`` shape. Call only after
+    the coordinate-system records have been validated.
+    """
+    transformations = get_transformation(sdata[element_name], get_all=True)
+    recorded = sorted(set(transformations) & set(coordinate_systems))
+    if len(recorded) != 1:
+        raise ValueError(
+            f"CosMx element {element_name!r} must have a transformation to exactly one coordinate system in "
+            f"{_HARPY_METADATA_KEY}.{_COORDINATE_SYSTEMS_METADATA_KEY}, found {recorded or 'none'}. Run the "
+            "CosMx reader again to rewrite the store."
+        )
+    coordinate_system = recorded[0]
+    transformation = transformations[coordinate_system]
+    if not isinstance(transformation, Identity):
+        raise ValueError(
+            f"CosMx element {element_name!r} must lie unscaled in coordinate system {coordinate_system!r}, with an "
+            f"Identity transformation, found {transformation}. Run the CosMx reader again to rewrite the store."
+        )
+    bounds_path = f"{_coordinate_system_path(coordinate_system)}.{_FOV_BOUNDS_KEY}"
+    for fov, rectangle in coordinate_systems[coordinate_system][_FOV_BOUNDS_KEY].items():
+        if rectangle["y1"] > raster_shape[0] or rectangle["x1"] > raster_shape[1]:
+            raise ValueError(
+                f"CosMx metadata {bounds_path}[{fov!r}] must lie within the (y, x) shape {raster_shape} of element "
+                f"{element_name!r}, found {dict(rectangle)}."
+            )
 
 
 def _validate_points_records(
@@ -301,13 +360,23 @@ def _validate_points_records(
     *,
     panels: Mapping[str, _FeaturePanelContract],
     check_point_contents: bool,
-) -> set[str]:
-    sample_ids: set[str] = set()
+) -> None:
+    """Validate points records: the feature-panel reference, if any, and the panel-declared columns.
+
+    A points record needs no coordinate system: it may belong to any points
+    element of the store, such as one registered with
+    :func:`harpy.pt.add_feature_panel`. The columns are therefore checked
+    against Harpy's general panel contract, as :func:`harpy.pt.validate_points`
+    does: both exist, and the feature-class column is categorical. The feature
+    column is not checked: :func:`harpy.io.cosmx` writes it as a categorical,
+    but other writers need not. Their placement is not checked either, unlike
+    that of images and labels: points need not be written by
+    :func:`harpy.io.cosmx`, and have no shape to hold the FOV bounds against.
+    """
     for element_name, value in registry.items():
         path = _element_path(_POINTS_METADATA_KEY, element_name)
         _require_registered_element(sdata.points, element_name, element_type="points", path=path)
         record = _require_mapping(value, path=path)
-        sample_ids.add(_validate_common_element_record(record, path=path, raster_shape=None))
 
         panel_name = record.get("feature_panel")
         if panel_name is None:
@@ -320,14 +389,14 @@ def _validate_points_records(
         for column in (panel.feature_key, panel.feature_class_key):
             if column not in points.columns:
                 raise ValueError(f"CosMx points element {element_name!r} is missing panel-declared column {column!r}.")
-            dtype = points.dtypes[column]
-            if not isinstance(dtype, pd.CategoricalDtype):
-                raise ValueError(
-                    f"CosMx points element {element_name!r} column {column!r} must be categorical, found {dtype}."
-                )
+        dtype = points.dtypes[panel.feature_class_key]
+        if not isinstance(dtype, pd.CategoricalDtype):
+            raise ValueError(
+                f"CosMx points element {element_name!r} column {panel.feature_class_key!r} must be categorical, "
+                f"found {dtype}."
+            )
         if check_point_contents:
             _validate_points_panel_contents(points, element_name=element_name, panel=panel)
-    return sample_ids
 
 
 def _validate_feature_panels(registry: Mapping[str, object]) -> dict[str, _FeaturePanelContract]:
@@ -486,23 +555,29 @@ def _points_panel_partition_error(
     return pd.Series([error], name="error", dtype="object")
 
 
-def _validate_common_element_record(
-    record: Mapping[str, object],
-    *,
-    path: str,
-    raster_shape: tuple[int, int] | None,
-) -> str:
-    """Validate the fields shared by all element records and return the sample ID.
-
-    ``raster_shape`` is the scale-0 ``(y, x)`` shape of an image or labels
-    element, which every FOV rectangle must lie within; points pass ``None``.
-    """
+def _validate_coordinate_system_record(record: Mapping[str, object], *, path: str) -> tuple[str, int]:
+    """Validate the fields of one mosaic's coordinate-system record and return its ``(sample_id, mosaic)``."""
     sample_id = record.get(_SAMPLE_ID_KEY)
     try:
         _validate_identifier(sample_id, name="sample identifier")
     except ValueError as error:
         raise ValueError(f"Invalid CosMx metadata {path}.{_SAMPLE_ID_KEY}: {sample_id!r}.") from error
     assert isinstance(sample_id, str)
+
+    mosaic = record.get(_MOSAIC_KEY)
+    if isinstance(mosaic, bool) or not isinstance(mosaic, int) or mosaic < 1:
+        raise ValueError(f"CosMx metadata {path}.{_MOSAIC_KEY} must be a positive integer, found {mosaic!r}.")
+
+    microns_per_unit = record.get(_MICRONS_PER_UNIT_KEY)
+    if (
+        isinstance(microns_per_unit, bool)
+        or not isinstance(microns_per_unit, int | float)
+        or not math.isfinite(microns_per_unit)
+        or microns_per_unit <= 0
+    ):
+        raise ValueError(
+            f"CosMx metadata {path}.{_MICRONS_PER_UNIT_KEY} must be finite and positive, found {microns_per_unit!r}."
+        )
 
     fovs = record.get("fovs")
     if (
@@ -513,26 +588,7 @@ def _validate_common_element_record(
     ):
         raise ValueError(f"CosMx metadata {path}.fovs must be a non-empty sorted list of unique positive integers.")
 
-    mosaic = _require_mapping(record.get("mosaic"), path=f"{path}.mosaic")
-    mode = mosaic.get("mode")
-    if mode not in _MOSAIC_MODES:
-        raise ValueError(f"CosMx metadata {path}.mosaic.mode must be one of {_MOSAIC_MODES}, found {mode!r}.")
-    if "adjacency_tolerance_px" not in mosaic:
-        raise ValueError(f"CosMx metadata {path}.mosaic.adjacency_tolerance_px is required.")
-    tolerance = mosaic.get("adjacency_tolerance_px")
-    if mode == "single":
-        if tolerance is not None:
-            raise ValueError(f"CosMx metadata {path}.mosaic.adjacency_tolerance_px must be None in single mode.")
-    else:
-        _require_nonnegative_integer(tolerance, path=f"{path}.mosaic.adjacency_tolerance_px")
-    if "number" not in mosaic:
-        raise ValueError(
-            f"CosMx metadata {path}.mosaic.number is required. Stores written by older Harpy versions lack it; "
-            "run the CosMx reader again to rewrite the store."
-        )
-    number = mosaic["number"]
-    if isinstance(number, bool) or not isinstance(number, int) or number < 1:
-        raise ValueError(f"CosMx metadata {path}.mosaic.number must be a positive integer, found {number!r}.")
+    _validate_fov_bounds(record, fovs=fovs, path=path)
 
     origin = _require_mapping(record.get("source_origin_px"), path=f"{path}.source_origin_px")
     for axis in ("x", "y"):
@@ -540,41 +596,36 @@ def _validate_common_element_record(
         if isinstance(value, bool) or not isinstance(value, int):
             raise ValueError(f"CosMx metadata {path}.source_origin_px.{axis} must be an integer, found {value!r}.")
 
-    _validate_fov_bounds(record, fovs=fovs, path=path, raster_shape=raster_shape)
-
     orientation = _require_mapping(record.get("orientation"), path=f"{path}.orientation")
     for axis in ("flip_x", "flip_y"):
         if not isinstance(orientation.get(axis), bool):
             raise ValueError(f"CosMx metadata {path}.orientation.{axis} must be a bool.")
 
-    pixel_size = record.get("pixel_size_um")
-    if (
-        isinstance(pixel_size, bool)
-        or not isinstance(pixel_size, int | float)
-        or not math.isfinite(pixel_size)
-        or pixel_size <= 0
-    ):
-        raise ValueError(f"CosMx metadata {path}.pixel_size_um must be finite and positive, found {pixel_size!r}.")
+    grouping = _require_mapping(record.get("mosaic_grouping"), path=f"{path}.mosaic_grouping")
+    mode = grouping.get("mode")
+    if mode not in _MOSAIC_MODES:
+        raise ValueError(f"CosMx metadata {path}.mosaic_grouping.mode must be one of {_MOSAIC_MODES}, found {mode!r}.")
+    if "adjacency_tolerance_px" not in grouping:
+        raise ValueError(f"CosMx metadata {path}.mosaic_grouping.adjacency_tolerance_px is required.")
+    tolerance = grouping.get("adjacency_tolerance_px")
+    if mode == "single":
+        if tolerance is not None:
+            raise ValueError(
+                f"CosMx metadata {path}.mosaic_grouping.adjacency_tolerance_px must be None in single mode."
+            )
+    else:
+        _require_nonnegative_integer(tolerance, path=f"{path}.mosaic_grouping.adjacency_tolerance_px")
 
     if "acquisition_timestamp" in record:
         _require_nonempty_string(record["acquisition_timestamp"], path=f"{path}.acquisition_timestamp")
-    return sample_id
+    return sample_id, mosaic
 
 
-def _validate_fov_bounds(
-    record: Mapping[str, object],
-    *,
-    fovs: list[int],
-    path: str,
-    raster_shape: tuple[int, int] | None,
-) -> None:
-    """Validate the half-open FOV rectangles of a record with valid ``fovs``."""
+def _validate_fov_bounds(record: Mapping[str, object], *, fovs: list[int], path: str) -> None:
+    """Validate the half-open, non-overlapping FOV rectangles of a record with valid ``fovs``."""
     path = f"{path}.{_FOV_BOUNDS_KEY}"
     if _FOV_BOUNDS_KEY not in record:
-        raise ValueError(
-            f"CosMx metadata {path} is required. Stores written by older Harpy versions lack it; "
-            "run the CosMx reader again to rewrite the store."
-        )
+        raise ValueError(f"CosMx metadata {path} is required; run the CosMx reader again to rewrite the store.")
     bounds = _require_mapping(record[_FOV_BOUNDS_KEY], path=path)
     keys = [str(fov) for fov in fovs]
     if set(bounds) != set(keys):
@@ -595,11 +646,6 @@ def _validate_fov_bounds(
         )
         if y0 >= y1 or x0 >= x1:
             raise ValueError(f"CosMx metadata {rectangle_path} must have y0 < y1 and x0 < x1, found {dict(rectangle)}.")
-        if raster_shape is not None and (y1 > raster_shape[0] or x1 > raster_shape[1]):
-            raise ValueError(
-                f"CosMx metadata {rectangle_path} must lie within the element's (y, x) shape {raster_shape}, "
-                f"found {dict(rectangle)}."
-            )
         rectangles.append((key, y0, x0, y1, x1))
 
     for index, (key, y0, x0, y1, x1) in enumerate(rectangles):
@@ -645,6 +691,10 @@ def _require_registered_element(
 
 def _element_path(registry: str, element_name: object) -> str:
     return f"{_HARPY_METADATA_KEY}.{registry}[{element_name!r}]"
+
+
+def _coordinate_system_path(coordinate_system: object) -> str:
+    return _element_path(_COORDINATE_SYSTEMS_METADATA_KEY, coordinate_system)
 
 
 def _require_mapping(value: object, *, path: str) -> Mapping[str, Any]:
