@@ -21,7 +21,6 @@ def _summary(kind):
     )
     metadata = PointsSummaryMetadata(
         points_name="calls",
-        sample_id=None,
         feature_panel="panel",
         to_coordinate_system="global",
         crd=None,

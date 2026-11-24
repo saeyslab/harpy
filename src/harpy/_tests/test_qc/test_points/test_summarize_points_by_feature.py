@@ -96,7 +96,7 @@ def test_feature_summary_returns_typed_outputs_and_shared_metadata():
     assert result.metadata == summary.metadata
     for frame in (result.per_feature, bins, result.spatial_bins.per_feature):
         assert not frame.attrs
-        assert not {"points_name", "to_coordinate_system", "feature_panel", "sample_id"} & set(frame)
+        assert not {"points_name", "to_coordinate_system", "feature_panel"} & set(frame)
     assert not grid.attrs
 
 
@@ -430,7 +430,7 @@ def test_feature_summary_does_not_mutate_backed_source_or_invoke_aggregation(tmp
     assert {path.relative_to(store): path.read_bytes() for path in store.rglob("*") if path.is_file()} == files
 
 
-@pytest.mark.parametrize("change", ["panel_key", "panel_features", "sample_id"])
+@pytest.mark.parametrize("change", ["panel_key", "panel_features"])
 def test_reference_source_metadata_must_still_match(change):
     sdata = _sdata()
     summary = summarize_points(sdata, "calls", bin_size=2)
@@ -438,8 +438,6 @@ def test_reference_source_metadata_must_still_match(change):
     if change == "panel_key":
         root["feature_panels"]["other"] = root["feature_panels"]["panel_a"]
         root["points"]["calls"]["feature_panel"] = "other"
-    elif change == "sample_id":
-        root["points"]["calls"]["sample_id"] = "other"
     else:
         root["feature_panels"]["panel_a"]["features_by_class"]["Endogenous"].append("ZzzGene")
     with pytest.raises(ValueError, match="recompute summarize_points"):
