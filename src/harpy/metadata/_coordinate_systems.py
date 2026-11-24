@@ -65,8 +65,9 @@ def _element_coordinate_system(sdata: SpatialData, element_name: str) -> str | N
     ------
     ValueError
         If ``element_name`` is a table, which has no transformations, or not an
-        element of ``sdata``; or if the element has transformations to several
-        coordinate systems with Harpy metadata.
+        element of ``sdata``; or if the element has transformations to two or
+        more coordinate systems with Harpy metadata. Transformations to
+        coordinate systems without Harpy metadata are ignored.
     """
     if element_name in sdata.tables:
         raise ValueError(
