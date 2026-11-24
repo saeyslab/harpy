@@ -284,10 +284,10 @@ def cosmx(
 
     **Assigning cells to FOVs**
 
-    :func:`harpy.io.assign_cosmx_fovs` adds the sample and FOV of each row of
-    a table to its ``.obs``, from the ``fov_bounds`` of the mosaic's
-    coordinate system, for any segmentation mask of the mosaic, such as a
-    custom segmentation.
+    :func:`harpy.io.assign_cosmx_fovs` adds the sample ID, mosaic number and FOV
+    number of each row of a table to its ``.obs``, from the record of the
+    mosaic's coordinate system, for any segmentation mask of the mosaic, such as
+    a custom segmentation.
     """
     enabled_product_output_names = _validate_enabled_product_output_names(
         images=images,

@@ -10,7 +10,7 @@ from spatialdata.transformations import get_transformation
 
 from harpy.io._cosmx._constants import _FOV_BOUNDS_KEY
 from harpy.metadata._coordinate_systems import _coordinate_system_records, _element_coordinate_system
-from harpy.metadata._registry import _COORDINATE_SYSTEMS_METADATA_KEY, _HARPY_METADATA_KEY, _SAMPLE_ID_KEY
+from harpy.metadata._registry import _COORDINATE_SYSTEMS_METADATA_KEY, _HARPY_METADATA_KEY, _MOSAIC_KEY, _SAMPLE_ID_KEY
 from harpy.table.canonical_centers import CANONICAL_OBSM_KEY
 
 
@@ -20,8 +20,9 @@ def assign_cosmx_fovs(
     table_name: str,
     fov_key: str = "fov",
     sample_key: str = "sample_id",
+    mosaic_key: str = "mosaic",
 ) -> None:
-    """Add the CosMx sample and FOV of each row of a table to its ``.obs``, in place.
+    """Add the CosMx sample ID, mosaic number and FOV number of each row of a table to its ``.obs``, in place.
 
     For each segmentation mask that the table annotates, such as a custom
     segmentation, on a mosaic (a group of adjacent FOVs stitched into one
@@ -29,14 +30,15 @@ def assign_cosmx_fovs(
 
         table.obsm["spatial_canonical"]          centers, in the mask's intrinsic frame
                   │
-                  │  mask -> the mosaic's coordinate system, the one with a
+                  │  mask -> its mosaic's coordinate system cs, the one with a
                   │  record in sdata.attrs["harpy"]["coordinate_systems"]
                   v
-        centers in the mosaic's coordinate system
+        centers in cs
                   │
-                  │  half-open bounds test against the record's fov_bounds
+                  │  half-open bounds test against
+                  │  sdata.attrs["harpy"]["coordinate_systems"][cs]["fov_bounds"]
                   v
-        table.obs[fov_key], table.obs[sample_key]
+        table.obs[fov_key]; from the same record, table.obs[sample_key] and table.obs[mosaic_key]
 
     The canonical centers come from :func:`harpy.tb.aggregate_points` or
     :func:`harpy.tb.add_canonical_centers`. The mask may lie on a crop or
@@ -59,30 +61,38 @@ def assign_cosmx_fovs(
         Regions table whose regions are segmentation masks, with canonical
         centers.
     fov_key
-        Column of ``.obs`` to add the FOV numbers to, as pandas' nullable
-        ``Int64``: ``<NA>`` when the center lies in a gap between FOVs or
-        outside the mosaic. An existing column is replaced.
+        Column of ``.obs`` to add the FOV numbers to, as a categorical with
+        integer categories: all FOVs of the mosaics of the table's masks, also
+        FOVs without rows. A row whose center lies in a gap between FOVs or
+        outside the mosaic has a missing value. An existing column is replaced.
     sample_key
-        Column of ``.obs`` to add the CosMx samples to, categorical, also for
-        rows without a FOV. FOV numbers repeat across samples, so the two
-        columns together identify a FOV. An existing column is replaced.
+        Column of ``.obs`` to add the CosMx samples to, as a categorical, also
+        for rows without a FOV. FOV numbers repeat across samples, so the
+        sample and FOV columns together identify a FOV. An existing column is
+        replaced.
+    mosaic_key
+        Column of ``.obs`` to add the mosaic numbers to, as a categorical with
+        integer categories: the mosaics of the table's masks. Also for rows
+        without a FOV. Mosaic numbers repeat across samples, so the sample and
+        mosaic columns together identify a mosaic, in practice one tissue
+        section. An existing column is replaced.
 
     Raises
     ------
     ValueError
         If the table is missing, is not a regions table or has no canonical
         centers; if a column to add would replace the table's region or
-        instance column, or the two columns share a name; if the store records
-        no coordinate systems; if a segmentation mask is missing from
+        instance column, or two of the columns share a name; if the store
+        records no coordinate systems; if a segmentation mask is missing from
         ``sdata``, or has a transformation to no recorded coordinate system,
         or to several; or if the record of its coordinate system has no
         ``fov_bounds``. The table is unchanged then.
 
     Notes
     -----
-    The reader records each mosaic's facts, such as its sample and the bounds
-    of its FOVs, in ``sdata.attrs["harpy"]["coordinate_systems"]``, under the
-    name of the mosaic's pixel coordinate system, such as
+    The reader records each mosaic's facts, such as its sample, its number and
+    the bounds of its FOVs, in ``sdata.attrs["harpy"]["coordinate_systems"]``,
+    under the name of the mosaic's pixel coordinate system, such as
     ``<sample>_global_1``. A mask segmented on the mosaic's morphology image,
     or on a crop or copy of it, keeps the image's transformation to that
     coordinate system, and so identifies its mosaic. The bounds are in units
@@ -96,6 +106,10 @@ def assign_cosmx_fovs(
 
         hp.io.assign_cosmx_fovs(sdata, table_name="table")
         hp.tb.io.add_table_updates(sdata, table_name="table", overwrite=True)
+
+        # Instances per section, and per FOV of each section.
+        sdata.tables["table"].obs.groupby(["sample_id", "mosaic"], observed=True).size()
+        sdata.tables["table"].obs.groupby(["sample_id", "mosaic", "fov"], observed=True).size()
     """
     if table_name not in sdata.tables:
         raise ValueError(f"Table {table_name!r} is not a table of sdata.")
@@ -103,9 +117,10 @@ def assign_cosmx_fovs(
     if TableModel.ATTRS_KEY not in table.uns:
         raise ValueError(f"Table {table_name!r} is not a SpatialData regions table.")
     _, region_key, instance_key = get_table_keys(table)
-    if fov_key == sample_key:
-        raise ValueError(f"fov_key and sample_key must differ, found {fov_key!r} for both.")
-    for key in (fov_key, sample_key):
+    keys = {"fov_key": fov_key, "sample_key": sample_key, "mosaic_key": mosaic_key}
+    if len(set(keys.values())) != len(keys):
+        raise ValueError(f"fov_key, sample_key and mosaic_key must differ, found {keys}.")
+    for key in keys.values():
         if key in (region_key, instance_key):
             raise ValueError(f"Column {key!r} would replace the region or instance column of table {table_name!r}.")
     if CANONICAL_OBSM_KEY not in table.obsm:
@@ -126,12 +141,18 @@ def assign_cosmx_fovs(
     centers = np.asarray(table.obsm[CANONICAL_OBSM_KEY])[:, 1:]
     fovs = np.zeros(table.n_obs, dtype=np.int64)
     sample_ids = np.empty(table.n_obs, dtype=object)
+    mosaics = np.zeros(table.n_obs, dtype=np.int64)
+    fov_categories: set[int] = set()
     for labels_name in pd.unique(regions):
         rows = regions == labels_name
-        fovs[rows], sample_ids[rows] = _assign_region(sdata, labels_name, centers[rows], records=records)
+        fovs[rows], sample_ids[rows], mosaics[rows], mosaic_fovs = _assign_region(
+            sdata, labels_name, centers[rows], records=records
+        )
+        fov_categories.update(mosaic_fovs)
 
-    table.obs[fov_key] = pd.arrays.IntegerArray(fovs, mask=fovs == 0)
+    table.obs[fov_key] = _integer_categorical(fovs, categories=fov_categories)
     table.obs[sample_key] = pd.Categorical(sample_ids)
+    table.obs[mosaic_key] = _integer_categorical(mosaics, categories=set(mosaics.tolist()))
 
 
 def _assign_region(
@@ -140,8 +161,8 @@ def _assign_region(
     centers: np.ndarray,
     *,
     records: Mapping[str, Mapping[str, object]],
-) -> tuple[np.ndarray, str]:
-    """Return the FOV of each ``(y, x)`` center of one mask, 0 outside every FOV, and the mask's sample."""
+) -> tuple[np.ndarray, str, int, set[int]]:
+    """Return the FOV of each ``(y, x)`` center of one mask, 0 outside every FOV; and its sample, mosaic and FOVs."""
     if labels_name not in sdata.labels:
         raise ValueError(f"Segmentation mask {labels_name!r} of the table is not a labels element of sdata.")
     coordinate_system = _element_coordinate_system(sdata, labels_name)
@@ -169,4 +190,12 @@ def _assign_region(
     fovs = np.zeros(len(yx), dtype=np.int64)
     for fov, b in bounds.items():
         fovs[(b["y0"] <= y) & (y < b["y1"]) & (b["x0"] <= x) & (x < b["x1"])] = int(fov)
-    return fovs, str(record[_SAMPLE_ID_KEY])
+    return fovs, str(record[_SAMPLE_ID_KEY]), int(record[_MOSAIC_KEY]), {int(fov) for fov in bounds}
+
+
+def _integer_categorical(values: np.ndarray, *, categories: set[int]) -> pd.Categorical:
+    """Return ``values`` as an unordered categorical with numerically sorted integer categories; 0 is missing."""
+    sorted_categories = np.array(sorted(categories), dtype=np.int64)
+    codes = np.searchsorted(sorted_categories, values)
+    codes[values == 0] = -1
+    return pd.Categorical.from_codes(codes, categories=pd.Index(sorted_categories))
