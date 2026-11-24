@@ -12,14 +12,18 @@ from dask import delayed
 from loguru import logger as log
 from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
-from spatialdata.transformations import Identity, Scale
+from spatialdata.transformations import Identity
 
 from harpy.image._image import add_image
-from harpy.io._cosmx._metadata import _commit_element_metadata, _common_element_record
+from harpy.io._cosmx._metadata import _commit_element_metadata, _coordinate_system_record
 from harpy.io._cosmx._models import _CosmxManifest, _CosmxMosaicGeometry, _CosmxPreview
-from harpy.io._cosmx._names import _element_name, _micron_coordinate_system, _pixel_coordinate_system
+from harpy.io._cosmx._names import _element_name, _pixel_coordinate_system
 from harpy.io._cosmx._raster import _assemble_raster
-from harpy.metadata._registry import _IMAGES_METADATA_KEY, _validate_metadata_destination
+from harpy.metadata._registry import (
+    _COORDINATE_SYSTEMS_METADATA_KEY,
+    _IMAGES_METADATA_KEY,
+    _validate_metadata_destination,
+)
 
 _DEFAULT_CHUNKS = (1, 1024, 1024)
 
@@ -55,25 +59,13 @@ def _add_morphology_images(
     blocks are concatenated into a virtual mosaic and materialized only when
     Harpy writes the image element to the already-backed ``SpatialData`` store.
 
-    Each image element receives a root metadata record containing:
-
-    - ``fovs``: source FOV numbers contributing to the mosaic;
-    - ``sample_id`` and ``mosaic``: the sample identity and the grouping
-      mode/effective adjacency tolerance;
-    - ``source_origin_px``: upper-left mosaic bound in the pre-group/source
-      pixel coordinate system. This origin is subtracted from every FOV
-      position so that the mosaic starts at ``(0, 0)``. It is source-geometry
-      metadata, not an active SpatialData transformation;
-    - ``fov_bounds_px``: each FOV's half-open pixel bounds ``y0``, ``x0``,
-      ``y1``, ``x1`` in the image's full-resolution intrinsic frame, keyed by
-      FOV number as a string;
-    - ``orientation``: dataset-wide local x/y-axis flips applied before
-      placement;
-    - ``pixel_size_um``: physical size of one source pixel coordinate unit;
-    - ``acquisition_timestamp`` when available: the consistent source
-      ``OrigTimeStamp`` value preserved verbatim; and
-    - ``channels``: retained acquisition channel IDs and names together with
-      their source TIFF planes and output channel coordinates.
+    Each image is written unscaled in its mosaic's pixel coordinate system,
+    whose record in ``sdata.attrs["harpy"]["coordinate_systems"]`` holds the
+    facts of the mosaic, such as its ``sample_id``, ``mosaic`` number,
+    ``microns_per_unit`` and ``fov_bounds``; see :func:`harpy.io.cosmx`. The
+    image's own record holds only ``channels``: the retained acquisition
+    channel IDs and names, with their source TIFF planes and output channel
+    coordinates.
 
     Parameters
     ----------
@@ -91,8 +83,8 @@ def _add_morphology_images(
         Base image-element name. Mosaic number ``n`` is appended as
         ``<base>_mosaic_n``.
     coordinate_system
-        Base coordinate-system name. Each mosaic receives independent
-        ``<base>_n`` pixel and ``<base>_n_micron`` physical systems.
+        Base coordinate-system name. Each mosaic receives its own pixel
+        coordinate system, ``<base>_n``.
     flip_x
         Whether to reverse the local TIFF x-axis before mosaic placement. The
         default follows the supported decoded-layout convention. The same value
@@ -131,7 +123,7 @@ def _add_morphology_images(
 
     _validate_chunks(chunks)
     selected_channels = _select_channels(preview, channels)
-    _validate_metadata_destination(sdata, _IMAGES_METADATA_KEY)
+    _validate_metadata_destination(sdata, _IMAGES_METADATA_KEY, _COORDINATE_SYSTEMS_METADATA_KEY)
     output_element_names = tuple(_element_name(output_image_name, mosaic.mosaic) for mosaic in preview.mosaics)
     existing = {name: element_type for element_type, name, _ in sdata.gen_elements() if name in output_element_names}
     wrong_type = sorted(name for name, element_type in existing.items() if element_type != "images")
@@ -151,8 +143,10 @@ def _add_morphology_images(
     ]
 
     for mosaic, output_element_name in zip(preview.mosaics, output_element_names, strict=True):
-        metadata = _common_element_record(preview, mosaic, sample_id=sample_id, flip_x=flip_x, flip_y=flip_y)
-        metadata["channels"] = [dict(channel) for channel in channel_records]
+        pixel_coordinate_system = _pixel_coordinate_system(coordinate_system, mosaic.mosaic)
+        coordinate_system_record = _coordinate_system_record(
+            preview, mosaic, sample_id=sample_id, flip_x=flip_x, flip_y=flip_y
+        )
         array = _morphology_mosaic(
             preview.manifest,
             mosaic,
@@ -165,29 +159,22 @@ def _add_morphology_images(
             f"CosMx morphology mosaic {mosaic.mosaic} pre-write graph contains "
             f"{len(array.__dask_graph__())} tasks across {len(array.dask.layers)} layers."
         )
-        pixel_coordinate_system = _pixel_coordinate_system(coordinate_system, mosaic.mosaic)
-        micron_coordinate_system = _micron_coordinate_system(pixel_coordinate_system)
         sdata = add_image(
             sdata,
             arr=array,
             output_image_name=output_element_name,
             dims=("c", "y", "x"),
             chunks=chunks,
-            transformations={
-                pixel_coordinate_system: Identity(),
-                micron_coordinate_system: Scale(
-                    [preview.manifest.run.pixel_size_um, preview.manifest.run.pixel_size_um],
-                    axes=("x", "y"),
-                ),
-            },
+            transformations={pixel_coordinate_system: Identity()},
             scale_factors=scale_factors,
             c_coords=[channel.output_coordinate for channel in selected_channels],
         )
         _commit_element_metadata(
             sdata,
+            coordinate_system=(pixel_coordinate_system, coordinate_system_record),
             registry=_IMAGES_METADATA_KEY,
             element_name=output_element_name,
-            record=metadata,
+            record={"channels": [dict(channel) for channel in channel_records]},
             reader_version=reader_version,
         )
     return sdata

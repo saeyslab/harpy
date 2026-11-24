@@ -10,11 +10,11 @@ from dask import delayed
 from loguru import logger as log
 from spatialdata import SpatialData
 from spatialdata.models.models import ScaleFactors_t
-from spatialdata.transformations import Identity, Scale
+from spatialdata.transformations import Identity
 
 from harpy.image._image import add_labels
 from harpy.io._cosmx._constants import _COMPARTMENT_CATEGORIES, _INSTANCE_ID_FORMULA
-from harpy.io._cosmx._metadata import _commit_element_metadata, _common_element_record
+from harpy.io._cosmx._metadata import _commit_element_metadata, _coordinate_system_record
 from harpy.io._cosmx._models import (
     _COMPARTMENT_LABELS_PRODUCT,
     _INSTANCE_ID_DTYPE,
@@ -24,9 +24,13 @@ from harpy.io._cosmx._models import (
     _CosmxPreview,
     _instance_id_base,
 )
-from harpy.io._cosmx._names import _element_name, _micron_coordinate_system, _pixel_coordinate_system
+from harpy.io._cosmx._names import _element_name, _pixel_coordinate_system
 from harpy.io._cosmx._raster import _assemble_raster
-from harpy.metadata._registry import _LABELS_METADATA_KEY, _validate_metadata_destination
+from harpy.metadata._registry import (
+    _COORDINATE_SYSTEMS_METADATA_KEY,
+    _LABELS_METADATA_KEY,
+    _validate_metadata_destination,
+)
 
 _DEFAULT_CHUNKS = (1024, 1024)
 _LabelFamily = Literal["instance_labels", "compartment_labels"]
@@ -112,26 +116,15 @@ def _add_label_family(
     morphology. Instance labels are remapped to globally unique ``uint32`` IDs;
     compartment labels retain their semantic values and source dtype.
 
-    Each label element receives a root metadata record containing:
+    Each label element is written unscaled in its mosaic's pixel coordinate
+    system, whose record in ``sdata.attrs["harpy"]["coordinate_systems"]``
+    holds the facts of the mosaic, such as its ``sample_id``, ``mosaic``
+    number, ``microns_per_unit`` and ``fov_bounds``; see
+    :func:`harpy.io.cosmx`. The element's own record holds only:
 
-    - ``fovs``: source FOV numbers contributing to the mosaic;
-    - ``sample_id`` and ``mosaic``: the sample identity and the grouping
-      mode/effective adjacency tolerance;
-    - ``source_origin_px``: upper-left mosaic bound in the pre-group/source
-      pixel coordinate system. This origin is subtracted from every FOV
-      position so that the mosaic starts at ``(0, 0)``. It is source-geometry
-      metadata, not an active SpatialData transformation;
-    - ``fov_bounds_px``: each FOV's half-open pixel bounds ``y0``, ``x0``,
-      ``y1``, ``x1`` in the raster's full-resolution intrinsic frame, keyed by
-      FOV number as a string;
-    - ``orientation``: dataset-wide local x/y-axis flips applied before
-      placement;
-    - ``pixel_size_um``: physical size of one source pixel coordinate unit;
-    - ``acquisition_timestamp`` when available: the consistent source
-      ``OrigTimeStamp`` value preserved verbatim;
     - ``instance_id_encoding`` for instance labels: background value, complete
       source-dtype range reserved per FOV, and the local-to-global ID formula;
-      and
+      or
     - ``categories`` for compartment labels: biological meanings assigned to
       the supported integer codes zero through three.
 
@@ -148,7 +141,7 @@ def _add_label_family(
     output_labels_name
         Base element name; ``_mosaic_<n>`` is appended for each mosaic.
     coordinate_system
-        Base name for each mosaic's independent pixel and physical systems.
+        Base name for each mosaic's own pixel coordinate system, ``<base>_n``.
     flip_x, flip_y
         Dataset-wide local TIFF-axis flips shared with images and transcripts.
     chunks
@@ -173,7 +166,7 @@ def _add_label_family(
         raise ValueError("CosMx coordinate-system base name must not be empty.")
 
     _validate_label_chunks(chunks)
-    _validate_metadata_destination(sdata, _LABELS_METADATA_KEY)
+    _validate_metadata_destination(sdata, _LABELS_METADATA_KEY, _COORDINATE_SYSTEMS_METADATA_KEY)
     output_element_names = tuple(_element_name(output_labels_name, mosaic.mosaic) for mosaic in preview.mosaics)
     existing = {name: element_type for element_type, name, _ in sdata.gen_elements() if name in output_element_names}
     wrong_type = sorted(name for name, element_type in existing.items() if element_type != "labels")
@@ -195,16 +188,22 @@ def _add_label_family(
     instance_id_base = _instance_id_base(source_dtype) if family == _INSTANCE_LABELS_PRODUCT else None
 
     for mosaic, output_element_name in zip(preview.mosaics, output_element_names, strict=True):
-        metadata = _common_element_record(preview, mosaic, sample_id=sample_id, flip_x=flip_x, flip_y=flip_y)
+        pixel_coordinate_system = _pixel_coordinate_system(coordinate_system, mosaic.mosaic)
+        coordinate_system_record = _coordinate_system_record(
+            preview, mosaic, sample_id=sample_id, flip_x=flip_x, flip_y=flip_y
+        )
+        metadata: dict[str, object]
         if family == _INSTANCE_LABELS_PRODUCT:
             assert instance_id_base is not None
-            metadata["instance_id_encoding"] = {
-                "background": 0,
-                "base": instance_id_base,
-                "formula": _INSTANCE_ID_FORMULA,
+            metadata = {
+                "instance_id_encoding": {
+                    "background": 0,
+                    "base": instance_id_base,
+                    "formula": _INSTANCE_ID_FORMULA,
+                }
             }
         else:
-            metadata["categories"] = dict(_COMPARTMENT_CATEGORIES)
+            metadata = {"categories": dict(_COMPARTMENT_CATEGORIES)}
         array = _label_mosaic(
             preview.manifest,
             mosaic,
@@ -219,24 +218,18 @@ def _add_label_family(
             f"CosMx {family} mosaic {mosaic.mosaic} pre-write graph contains "
             f"{len(array.__dask_graph__())} tasks across {len(array.dask.layers)} layers."
         )
-        pixel_coordinate_system = _pixel_coordinate_system(coordinate_system, mosaic.mosaic)
         sdata = add_labels(
             sdata,
             arr=array,
             output_labels_name=output_element_name,
             dims=("y", "x"),
             chunks=chunks,
-            transformations={
-                pixel_coordinate_system: Identity(),
-                _micron_coordinate_system(pixel_coordinate_system): Scale(
-                    [preview.manifest.run.pixel_size_um, preview.manifest.run.pixel_size_um],
-                    axes=("x", "y"),
-                ),
-            },
+            transformations={pixel_coordinate_system: Identity()},
             scale_factors=scale_factors,
         )
         _commit_element_metadata(
             sdata,
+            coordinate_system=(pixel_coordinate_system, coordinate_system_record),
             registry=_LABELS_METADATA_KEY,
             element_name=output_element_name,
             record=metadata,
