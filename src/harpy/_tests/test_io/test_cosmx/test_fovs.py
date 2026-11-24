@@ -180,8 +180,8 @@ def test_assign_cosmx_fovs_columns_survive_a_zarr_round_trip(cosmx_table: Spatia
     ("case", "message"),
     [
         ("no_centers", "add_canonical_centers"),
-        ("no_registry", "records no coordinate systems"),
-        ("no_recorded_coordinate_system", "has no transformation to a coordinate system recorded in"),
+        ("no_registry", "No coordinate system of SpatialData has Harpy metadata"),
+        ("no_recorded_coordinate_system", "has no transformation to a coordinate system with Harpy metadata"),
         ("two_recorded_coordinate_systems", "several coordinate systems with Harpy metadata"),
         ("region_column", "would replace the region or instance column"),
         ("mosaic_region_column", "would replace the region or instance column"),

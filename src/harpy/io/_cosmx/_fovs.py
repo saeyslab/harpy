@@ -30,15 +30,15 @@ def assign_cosmx_fovs(
 
         table.obsm["spatial_canonical"]          centers, in the mask's intrinsic frame
                   │
-                  │  mask -> its mosaic's coordinate system cs, the one with a
-                  │  record in sdata.attrs["harpy"]["coordinate_systems"]
+                  │  mask -> its mosaic's coordinate system cs, the one with
+                  │  Harpy metadata in sdata.attrs["harpy"]["coordinate_systems"]
                   v
         centers in cs
                   │
                   │  half-open bounds test against
                   │  sdata.attrs["harpy"]["coordinate_systems"][cs]["fov_bounds"]
                   v
-        table.obs[fov_key]; from the same record, table.obs[sample_key] and table.obs[mosaic_key]
+        table.obs[fov_key]; from the same metadata, table.obs[sample_key] and table.obs[mosaic_key]
 
     The canonical centers come from :func:`harpy.tb.aggregate_points` or
     :func:`harpy.tb.add_canonical_centers`. The mask may lie on a crop or
@@ -54,8 +54,8 @@ def assign_cosmx_fovs(
     Parameters
     ----------
     sdata
-        SpatialData with the table and its segmentation masks, and the records
-        of the mosaics' coordinate systems, as written by
+        SpatialData with the table and its segmentation masks, and the Harpy
+        metadata of the mosaics' coordinate systems, as written by
         :func:`harpy.io.cosmx`.
     table_name
         Regions table whose regions are segmentation masks, with canonical
@@ -66,27 +66,29 @@ def assign_cosmx_fovs(
         FOVs without rows. A row whose center lies in a gap between FOVs or
         outside the mosaic has a missing value. An existing column is replaced.
     sample_key
-        Column of ``.obs`` to add the CosMx samples to, as a categorical, also
-        for rows without a FOV. FOV numbers repeat across samples, so the
-        sample and FOV columns together identify a FOV. An existing column is
-        replaced.
+        Column of ``.obs`` to add the CosMx samples to, as a categorical. A
+        row's sample is taken from the Harpy metadata of its mask's coordinate
+        system, not from its FOV, so a row without a FOV has one too. FOV
+        numbers repeat across samples, so the sample and FOV columns together
+        identify a FOV. An existing column is replaced.
     mosaic_key
         Column of ``.obs`` to add the mosaic numbers to, as a categorical with
-        integer categories: the mosaics of the table's masks. Also for rows
-        without a FOV. Mosaic numbers repeat across samples, so the sample and
-        mosaic columns together identify a mosaic, in practice one tissue
-        section. An existing column is replaced.
+        integer categories: the mosaics of the table's masks. As the sample, a
+        row's mosaic is taken from the Harpy metadata of its mask's coordinate
+        system, not from its FOV. Mosaic numbers repeat across samples, so the
+        sample and mosaic columns together identify a mosaic, in practice one
+        tissue section. An existing column is replaced.
 
     Raises
     ------
     ValueError
         If the table is missing, is not a regions table or has no canonical
         centers; if a column to add would replace the table's region or
-        instance column, or two of the columns share a name; if the store
-        records no coordinate systems; if a segmentation mask is missing from
-        ``sdata``, or has a transformation to no recorded coordinate system,
-        or to several; or if the record of its coordinate system has no
-        ``fov_bounds``. The table is unchanged then.
+        instance column, or two of the columns share a name; if no coordinate
+        system has Harpy metadata; if a segmentation mask is missing from
+        ``sdata``, or has a transformation to no coordinate system with Harpy
+        metadata, or to several; or if the Harpy metadata of its coordinate
+        system has no ``fov_bounds``. The table is unchanged then.
 
     Notes
     -----
@@ -97,8 +99,8 @@ def assign_cosmx_fovs(
     or on a crop or copy of it, keeps the image's transformation to that
     coordinate system, and so identifies its mosaic. The bounds are in units
     of that coordinate system, the intrinsic frame of the reader's elements. A
-    coordinate system without a record, such as one added to align samples, is
-    ignored.
+    coordinate system without Harpy metadata, such as one added to align
+    samples, is ignored.
 
     Examples
     --------
@@ -131,7 +133,7 @@ def assign_cosmx_fovs(
     records = _coordinate_system_records(sdata)
     if not records:
         raise ValueError(
-            f"SpatialData records no coordinate systems in "
+            f"No coordinate system of SpatialData has Harpy metadata in "
             f"sdata.attrs[{_HARPY_METADATA_KEY!r}][{_COORDINATE_SYSTEMS_METADATA_KEY!r}]; write the store with "
             "harpy.io.cosmx."
         )
@@ -168,16 +170,16 @@ def _assign_region(
     coordinate_system = _element_coordinate_system(sdata, labels_name)
     if coordinate_system is None:
         raise ValueError(
-            f"Segmentation mask {labels_name!r} has no transformation to a coordinate system recorded in "
-            f"sdata.attrs[{_HARPY_METADATA_KEY!r}][{_COORDINATE_SYSTEMS_METADATA_KEY!r}], {sorted(records)}. "
+            f"Segmentation mask {labels_name!r} has no transformation to a coordinate system with Harpy metadata "
+            f"in sdata.attrs[{_HARPY_METADATA_KEY!r}][{_COORDINATE_SYSTEMS_METADATA_KEY!r}], {sorted(records)}. "
             "Place it in its mosaic's coordinate system, as hp.im.segment does for labels of a CosMx image."
         )
     record = records[coordinate_system]
     bounds = record.get(_FOV_BOUNDS_KEY)
     if not isinstance(bounds, Mapping):
         raise ValueError(
-            f"The record of coordinate system {coordinate_system!r} has no {_FOV_BOUNDS_KEY}; run the CosMx reader "
-            "again to rewrite the store."
+            f"The Harpy metadata of coordinate system {coordinate_system!r} has no {_FOV_BOUNDS_KEY}; run the CosMx "
+            "reader again to rewrite the store."
         )
 
     # From the mask's frame to the mosaic's coordinate system, in which the bounds are stored.
