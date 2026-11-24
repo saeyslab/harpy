@@ -131,8 +131,8 @@ them is out of scope.
 
 ## 1. A registry of the reader's coordinate systems
 
-Files: [`harpy/_metadata.py`](../../src/harpy/_metadata.py) (moves to
-`harpy/metadata/_registry.py` in [section 4](#4-public-functions-to-read-the-registry)),
+Files: [`harpy/metadata/_registry.py`](../../src/harpy/metadata/_registry.py) (formerly
+`harpy/_metadata.py`, moved in step 1 of the [implementation order](#implementation-order)),
 [`_cosmx/_metadata.py`](../../src/harpy/io/_cosmx/_metadata.py),
 [`_constants.py`](../../src/harpy/io/_cosmx/_constants.py),
 [`_images.py`](../../src/harpy/io/_cosmx/_images.py),
@@ -144,7 +144,7 @@ Files: [`harpy/_metadata.py`](../../src/harpy/_metadata.py) (moves to
 
 Records:
 
-- [ ] Add `coordinate_systems` to `_METADATA_REGISTRIES`.
+- [x] Add `coordinate_systems` to `_METADATA_REGISTRIES` (step 1, for the resolver).
 - [ ] Replace `_common_element_record` with a builder of the coordinate-system record of one mosaic,
       with the fields of the [target layout](#target-layout).
 - [ ] Reduce element records to their own fields: images `channels`; labels `instance_id_encoding` or
@@ -249,17 +249,22 @@ Acceptance:
 
 Package: `src/harpy/metadata/`, the single home of Harpy's metadata code.
 
-- [ ] Move the content of [`src/harpy/_metadata.py`](../../src/harpy/_metadata.py) (the registry
-      keys, the version, `_metadata_registry`, `_harpy_metadata`) to `src/harpy/metadata/_registry.py`,
-      remove `_metadata.py`, and update its importers.
-- [ ] `src/harpy/metadata/_coordinate_systems.py`: a private resolver from an element to its
+- [x] Move the content of `src/harpy/_metadata.py` (the registry keys, the version,
+      `_metadata_registry`, `_harpy_metadata`) to
+      [`src/harpy/metadata/_registry.py`](../../src/harpy/metadata/_registry.py), remove
+      `_metadata.py`, and update its importers.
+- [x] [`src/harpy/metadata/_coordinate_systems.py`](../../src/harpy/metadata/_coordinate_systems.py):
+      `_element_coordinate_system`, a private resolver from an element to its
       coordinate system with a Harpy record, used by sections 1 and 3: the one it has a transformation
-      to; `None` if none; an error naming them if several.
+      to; `None` if none; an error naming them if several. A table, which has no transformations, or
+      a name that is not an element of `sdata`, raises.
 - [ ] `hp.get_element_coordinate_system(sdata, element_name) -> str | None`, on that resolver.
 - [ ] `hp.get_coordinate_system_metadata(sdata) -> pandas.DataFrame`: one row per coordinate system
       with a Harpy record, indexed by its name, with the columns `sample_id`, `mosaic` and
-      `microns_per_unit`, then the other fields of the record. The docstring documents the columns as
-      the contract, and the CosMx fields as written by `hp.io.cosmx`.
+      `microns_per_unit`, then the other fields of the record. Nested fields (`fovs`, `fov_bounds`,
+      `orientation`, `mosaic_grouping`) are object columns, not flattened. A store without the registry
+      gives an empty DataFrame with the documented columns. The docstring documents the columns as the
+      contract, and the CosMx fields as written by `hp.io.cosmx`.
 - [ ] The package imports nothing from Harpy's other subpackages, only `spatialdata` and `pandas`, so
       that `harpy/__init__.py` can import it before them without circular imports.
 - [ ] Export both functions from `harpy/__init__.py`, in `__all__`, and add them to the API
@@ -273,12 +278,26 @@ Acceptance:
 - [ ] Downstream code finds a table's mosaic, the mosaic's morphology image and its `microns_per_unit`
       with `hp.get_element_coordinate_system` and `hp.get_coordinate_system_metadata`, without private
       imports, naming conventions or transformation searches of its own.
-- [ ] No module imports `harpy._metadata`.
+- [x] No module imports `harpy._metadata`.
 - [ ] The functions are documented and tested, including an element in no and in two coordinate
       systems with Harpy metadata.
 
+## Implementation order
+
+Within the one PR, in this order, running the focused tests of each step:
+
+1. [x] Section 4's package: move `_metadata.py` to `src/harpy/metadata/_registry.py`, update its
+       importers, and add the private resolver, which sections 1 and 3 use.
+2. [ ] Sections 1 and 2 together: the records, writing, the validator, `hp.qc.summarize_points`, and
+       the removal of the micron coordinate systems.
+3. [ ] Section 3: `assign_cosmx_fovs`, with #276.
+4. [ ] Section 4's public functions, the API documentation, and the handover.
+5. [ ] A broader test run at the end, as the move touches about ten modules; ask before running the
+       full suite.
+
 ## Tests
 
+- [ ] `src/harpy/_tests/test_metadata/`: the tests of the new package.
 - [ ] `src/harpy/_tests/test_io/test_cosmx/`: the modules that assert on the record layout, the
       micron coordinate systems or `fov_bounds_px`.
 - [ ] `src/harpy/_tests/test_qc/test_points/test_summarize_points.py` and
@@ -341,3 +360,9 @@ Stores written before this change must be written again with the reader.
   above about it; see Out of scope. #293 updated to match.
 - 2026-11-24: #293 brought up to date with this spec: scope and compatibility, #276 in section 3, the
   two `hp.get_*` functions and their package in section 4, and the handover table.
+- 2026-11-24: implementation details of section 4 and the implementation order added. Step 1 done:
+  `src/harpy/_metadata.py` moved to `src/harpy/metadata/_registry.py`, with the `coordinate_systems`
+  key; its 10 importers updated; `_element_coordinate_system` and `_coordinate_system_records` in
+  `src/harpy/metadata/_coordinate_systems.py`, with tests in
+  `src/harpy/_tests/test_metadata/test_coordinate_systems.py`. Focused tests of the registry's
+  importers pass (557).
