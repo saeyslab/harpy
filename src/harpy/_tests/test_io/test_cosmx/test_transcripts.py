@@ -9,7 +9,7 @@ import pandas as pd
 import pytest
 from spatialdata import SpatialData, read_zarr
 from spatialdata.models import PointsModel
-from spatialdata.transformations import Identity, Scale, get_transformation
+from spatialdata.transformations import Identity, get_transformation
 
 from harpy.io._cosmx import _add_transcript_points, _discover_cosmx, _preview_cosmx, _transcripts
 from harpy.points import add_feature_panel
@@ -80,26 +80,26 @@ def test_add_transcript_points_splits_mosaics_and_roundtrips(
     roundtripped_values = roundtripped.points["transcripts_mosaic_1"].compute()
     assert isinstance(roundtripped_values["gene"].dtype, pd.CategoricalDtype)
     assert roundtripped_values["gene"].cat.categories.tolist() == ["GeneA", "GeneB", "GeneC"]
-    metadata = roundtripped.attrs["harpy"]["points"]["transcripts_mosaic_1"]
-    panel_name = metadata["feature_panel"]
-    assert metadata == {
-        "fovs": [1, 2],
+    assert roundtripped.attrs["harpy"]["coordinate_systems"]["global_1"] == {
         "sample_id": "sample",
-        "mosaic": {
-            "mode": preview.mosaic_mode,
-            "adjacency_tolerance_px": preview.adjacency_tolerance_px,
-            "number": 1,
-        },
-        "source_origin_px": {"x": 0, "y": 0},
-        "fov_bounds_px": {
+        "mosaic": 1,
+        "microns_per_unit": 1.0,
+        "fovs": [1, 2],
+        "fov_bounds": {
             "1": {"y0": 0, "x0": 0, "y1": 8, "x1": 8},
             "2": {"y0": 0, "x0": 8, "y1": 8, "x1": 16},
         },
+        "source_origin_px": {"x": 0, "y": 0},
         "orientation": {"flip_x": True, "flip_y": False},
-        "pixel_size_um": 1.0,
+        "mosaic_grouping": {
+            "mode": preview.mosaic_mode,
+            "adjacency_tolerance_px": preview.adjacency_tolerance_px,
+        },
         "acquisition_timestamp": "20240101_100000_S2",
-        "feature_panel": panel_name,
     }
+    metadata = roundtripped.attrs["harpy"]["points"]["transcripts_mosaic_1"]
+    panel_name = metadata["feature_panel"]
+    assert metadata == {"feature_panel": panel_name}
     assert roundtripped_values["code_class"].cat.categories.tolist() == [
         "Endogenous",
         "Negative",
@@ -247,8 +247,10 @@ def test_transcript_ingestion_without_plex_keeps_raw_classes(
     roundtripped = read_zarr(sdata.path)
     values = roundtripped.points["transcripts_mosaic_1"].compute()
     assert not isinstance(values["code_class"].dtype, pd.CategoricalDtype)
-    assert "feature_panel" not in roundtripped.attrs["harpy"]["points"]["transcripts_mosaic_1"]
+    # Without a panel, the points have no fields of their own, and so no record; their mosaic is recorded.
+    assert "points" not in roundtripped.attrs["harpy"]
     assert "feature_panels" not in roundtripped.attrs["harpy"]
+    assert roundtripped.attrs["harpy"]["coordinate_systems"]["global_1"]["sample_id"] == "sample"
 
 
 def test_transcript_materialization_rejects_panel_disagreement(
@@ -404,9 +406,5 @@ def _backed_sdata(tmp_path: Path) -> SpatialData:
 
 
 def _assert_transformations(sdata: SpatialData, points_name: str, *, mosaic: int) -> None:
-    transformations = get_transformation(sdata.points[points_name], get_all=True)
-    assert set(transformations) == {f"global_{mosaic}", f"global_{mosaic}_micron"}
-    assert transformations[f"global_{mosaic}"] == Identity()
-    expected = Scale([1.0, 1.0], axes=("x", "y")).to_affine_matrix(input_axes=("x", "y"), output_axes=("x", "y"))
-    actual = transformations[f"global_{mosaic}_micron"].to_affine_matrix(input_axes=("x", "y"), output_axes=("x", "y"))
-    np.testing.assert_array_equal(actual, expected)
+    # Only the mosaic's pixel coordinate system; no micron coordinate system.
+    assert get_transformation(sdata.points[points_name], get_all=True) == {f"global_{mosaic}": Identity()}

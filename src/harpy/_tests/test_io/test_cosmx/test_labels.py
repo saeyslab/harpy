@@ -8,7 +8,7 @@ import pytest
 import tifffile
 from spatialdata import SpatialData, read_zarr
 from spatialdata.models import Image2DModel
-from spatialdata.transformations import Identity, Scale, get_transformation
+from spatialdata.transformations import Identity, get_transformation
 
 from harpy.image._image import get_dataarray
 from harpy.io._cosmx import (
@@ -65,22 +65,24 @@ def test_add_instance_labels_remaps_stitches_and_roundtrips(
         get_dataarray(roundtripped, "instance_labels_mosaic_1").data.compute(),
         values,
     )
-    assert roundtripped.attrs["harpy"]["labels"]["instance_labels_mosaic_1"] == {
-        "fovs": [1, 2],
+    assert roundtripped.attrs["harpy"]["coordinate_systems"]["global_1"] == {
         "sample_id": "sample",
-        "mosaic": {
-            "mode": preview.mosaic_mode,
-            "adjacency_tolerance_px": preview.adjacency_tolerance_px,
-            "number": 1,
-        },
-        "source_origin_px": {"x": 0, "y": 0},
-        "fov_bounds_px": {
+        "mosaic": 1,
+        "microns_per_unit": 1.0,
+        "fovs": [1, 2],
+        "fov_bounds": {
             "1": {"y0": 0, "x0": 0, "y1": 8, "x1": 8},
             "2": {"y0": 0, "x0": 9, "y1": 8, "x1": 17},
         },
+        "source_origin_px": {"x": 0, "y": 0},
         "orientation": {"flip_x": True, "flip_y": False},
-        "pixel_size_um": 1.0,
+        "mosaic_grouping": {
+            "mode": preview.mosaic_mode,
+            "adjacency_tolerance_px": preview.adjacency_tolerance_px,
+        },
         "acquisition_timestamp": "20240101_100000_S2",
+    }
+    assert roundtripped.attrs["harpy"]["labels"]["instance_labels_mosaic_1"] == {
         "instance_id_encoding": {
             "background": 0,
             "base": 65_536,
@@ -119,6 +121,29 @@ def test_add_compartment_labels_preserves_semantic_values(
         2: "membrane",
         3: "cytoplasmic",
     }
+
+
+def test_labels_share_the_record_of_their_coordinate_system_and_reject_a_different_one(
+    decoded_cosmx_path: Path,
+    tmp_path: Path,
+) -> None:
+    preview = _labelled_preview(decoded_cosmx_path)
+    sdata = _backed_sdata(tmp_path)
+    _add_instance_labels(sdata, preview, sample_id="sample", chunks=(4, 4))
+    records = read_zarr(sdata.path).attrs["harpy"]["coordinate_systems"]
+
+    # Another product of the same mosaics finds and keeps the same records.
+    _add_compartment_labels(sdata, preview, sample_id="sample", chunks=(4, 4))
+    assert read_zarr(sdata.path).attrs["harpy"]["coordinate_systems"] == records
+
+    # Elements of another sample in the same coordinate systems would claim mosaics they do not describe.
+    with pytest.raises(ValueError, match=r"coordinate system 'global_1' of element .* already has a different record"):
+        _add_compartment_labels(
+            sdata, preview, sample_id="other", output_labels_name="other_compartment_labels", chunks=(4, 4)
+        )
+    reopened = read_zarr(sdata.path)
+    assert "other_compartment_labels_mosaic_1" not in reopened.labels
+    assert reopened.attrs["harpy"]["coordinate_systems"] == records
 
 
 def test_unsupported_compartment_value_fails_without_leaving_an_element(
@@ -283,9 +308,5 @@ def _instrument_label_reads(monkeypatch: pytest.MonkeyPatch) -> list[tuple[Path,
 
 
 def _assert_transformations(sdata: SpatialData, labels_name: str, *, mosaic: int) -> None:
-    transformations = get_transformation(sdata.labels[labels_name], get_all=True)
-    assert set(transformations) == {f"global_{mosaic}", f"global_{mosaic}_micron"}
-    assert transformations[f"global_{mosaic}"] == Identity()
-    expected = Scale([1.0, 1.0], axes=("x", "y")).to_affine_matrix(input_axes=("x", "y"), output_axes=("x", "y"))
-    actual = transformations[f"global_{mosaic}_micron"].to_affine_matrix(input_axes=("x", "y"), output_axes=("x", "y"))
-    np.testing.assert_array_equal(actual, expected)
+    # Only the mosaic's pixel coordinate system; no micron coordinate system.
+    assert get_transformation(sdata.labels[labels_name], get_all=True) == {f"global_{mosaic}": Identity()}
