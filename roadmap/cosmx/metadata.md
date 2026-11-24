@@ -25,7 +25,9 @@ relative paths without line numbers, as the code moves while it changes.
 - [x] Harpy writes no records on derived elements: a derived element lies in its source's coordinate
       systems.
 - [x] #276 lands in this PR: the FOV column of `assign_cosmx_fovs` becomes a categorical, with the
-      same convention as the mosaic column.
+      same convention as the mosaic column. Both are unordered categoricals, as the sample column:
+      their numerically sorted categories order plots and groupings; a range of FOVs is selected with
+      `isin`.
 - [x] Two public functions, at the top level: `hp.get_coordinate_system_metadata` and
       `hp.get_element_coordinate_system`, as SpatialData has `sd.get_element_annotators`. They live
       in a new package `src/harpy/metadata/`, which replaces `src/harpy/_metadata.py` as the single
@@ -242,28 +244,28 @@ File: [`_fovs.py`](../../src/harpy/io/_cosmx/_fovs.py). Includes #276, the FOV c
 - [x] Step 2: transform the canonical centers from the labels element into that coordinate system,
       and read the bounds and the sample from its record; the mosaic follows in step 3.
 - [x] Step 2: remove `_cosmx_image_of` and the requirement of a morphology image.
-- [ ] Add `mosaic_key: str = "mosaic"`, next to `fov_key` and `sample_key`. Write the mosaic number of
+- [x] Add `mosaic_key: str = "mosaic"`, next to `fov_key` and `sample_key`. Write the mosaic number of
       every row, also of rows between FOVs, as a categorical with integer categories sorted numerically:
       the mosaics of the table's regions.
-- [ ] Apply the existing checks to `mosaic_key`: it must not replace the region or instance column,
+- [x] Apply the existing checks to `mosaic_key`: it must not replace the region or instance column,
       and the three keys must differ.
-- [ ] Write the FOV column as a categorical instead of `Int64` (#276): integer categories sorted
+- [x] Write the FOV column as a categorical instead of `Int64` (#276): integer categories sorted
       numerically, so that FOVs order as 1, 2, 10; every FOV of the matched mosaics as a category, from
       their `fov_bounds`, also FOVs without rows; a missing value for rows between FOVs or outside the
       mosaic.
-- [ ] Update the docstring: the categorical FOV column, the new mosaic column, and the lookup through
+- [x] Update the docstring: the categorical FOV column, the new mosaic column, and the lookup through
       the registry instead of the image.
 - [ ] Close #276 with the PR.
 
 Acceptance:
 
-- [ ] A table over two mosaics of one sample gets the right mosaic per row, as a categorical, also for
+- [x] A table over two mosaics of one sample gets the right mosaic per row, as a categorical, also for
       labels segmented on a crop.
-- [ ] Rows outside every FOV keep their sample and mosaic.
+- [x] Rows outside every FOV keep their sample and mosaic.
 - [x] A store read with `images=False` works (step 2).
-- [ ] The FOV column is a categorical with every FOV of the matched mosaics as a category, in numeric
+- [x] The FOV column is a categorical with every FOV of the matched mosaics as a category, in numeric
       order, including FOVs without rows; rows outside every FOV have a missing value.
-- [ ] The FOV and mosaic columns keep their categories and missing values through a Zarr round trip.
+- [x] The FOV and mosaic columns keep their categories and missing values through a Zarr round trip.
 
 ## 4. Public functions to read the registry
 
@@ -311,7 +313,7 @@ Within the one PR, in this order, running the focused tests of each step:
 2. [x] Sections 1 and 2 together: the records, writing, the validator, `hp.qc.summarize_points`, the
        removal of the micron coordinate systems, and the lookup of `assign_cosmx_fovs` through the
        registry (section 3's first three tasks).
-3. [ ] The rest of section 3: the mosaic column of `assign_cosmx_fovs`, and #276.
+3. [x] The rest of section 3: the mosaic column of `assign_cosmx_fovs`, and #276.
 4. [ ] Section 4's public functions, the API documentation, and the handover.
 5. [ ] A broader test run at the end, as the move touches about ten modules; ask before running the
        full suite.
@@ -409,3 +411,9 @@ Stores written before this change must be written again with the reader.
 - 2026-11-24: docstrings name `harpy.io.cosmx` instead of "the reader". Decided to remove `sample_id`
   from `hp.qc.PointsSummaryMetadata`, and with it `_element_sample_id`; `_resolve_points_feature_panel`
   no longer returns the points record. Handover row added. Focused tests pass (767).
+- 2026-11-24: decided that the FOV and mosaic columns are unordered categoricals. Step 3 done:
+  `assign_cosmx_fovs` writes `mosaic_key`, and the FOV column as an integer categorical with every FOV
+  of the matched mosaics as a category (#276); the three keys must differ. The docstrings of
+  `assign_cosmx_fovs` and `hp.io.cosmx` describe the columns. Tests: the dtypes and categories, the
+  mosaic of each row over two mosaics and on a crop, a row outside every FOV, the new key checks, and
+  a Zarr round trip of the columns. The FOV tests pass (13).
