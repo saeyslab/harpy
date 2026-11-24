@@ -24,7 +24,6 @@ relative paths without line numbers, as the code moves while it changes.
 - [x] The reader writes no micron coordinate systems.
 - [x] Harpy writes no records on derived elements: a derived element lies in its source's coordinate
       systems.
-- [x] The expression class is part of the feature-panel contract, and so of its content hash.
 - [x] #276 lands in this PR: the FOV column of `assign_cosmx_fovs` becomes a categorical, with the
       same convention as the mosaic column.
 - [x] Two public functions, at the top level: `hp.get_coordinate_system_metadata` and
@@ -32,18 +31,15 @@ relative paths without line numbers, as the code moves while it changes.
       in a new package `src/harpy/metadata/`, which replaces `src/harpy/_metadata.py` as the single
       home of Harpy's metadata code. No public key constants: the documented columns of the DataFrame
       are the contract, and the functions supersede #292.
-- [x] `hp.tb.aggregate_points` is unchanged. A third top-level function in `src/harpy/metadata/`,
-      `hp.get_expression_class(sdata, points_name) -> str`, returns the expression class of the
-      points' feature panel, and callers pass it as `expression_class`. It raises when the points have
-      no panel, or their panel no expression class, rather than return `None`, which would select
-      ordinary mode. The recorded class is a default for callers, not a constraint: `aggregate_points`
-      still accepts any class of the panel.
+- [x] The expression class is not recorded in the feature panel; the former section 5 of #293 is
+      dropped. It stays a choice of the analysis, made when calling `hp.tb.aggregate_points`, as the
+      docstrings of `hp.io.cosmx`, `hp.pt.add_feature_panel` and `aggregate_points` document now.
+      Feature panels and `aggregate_points` are unchanged.
 - [x] This document is deleted before merging.
 
 ## Open
 
-- [ ] What the reader records for a plex without an `Endogenous` class: no expression class, or an
-      error.
+None. Add questions that come up during implementation here.
 
 ## Background
 
@@ -124,14 +120,9 @@ sdata.attrs["harpy"]["images"]["s1_morphology_image_mosaic_1"] = {"channels": [.
 sdata.attrs["harpy"]["labels"]["s1_instance_labels_mosaic_1"] = {"instance_id_encoding": {...}}
 sdata.attrs["harpy"]["labels"]["s1_compartment_labels_mosaic_1"] = {"categories": {...}}
 sdata.attrs["harpy"]["points"]["s1_transcripts_mosaic_1"] = {"feature_panel": "feature_panel_..."}
-sdata.attrs["harpy"]["feature_panels"]["feature_panel_..."] = {
-    "feature_key": "gene",
-    "feature_class_key": "code_class",
-    "classes": [...],
-    "features_by_class": {...},
-    "expression_class": "Endogenous",
-}
 ```
+
+`sdata.attrs["harpy"]["feature_panels"]` is unchanged.
 
 The mosaic of any element, read or derived, is the registered coordinate system it has a
 transformation to. The facts of the run (`microns_per_unit`, `orientation`, `mosaic_grouping`,
@@ -271,8 +262,8 @@ Package: `src/harpy/metadata/`, the single home of Harpy's metadata code.
       the contract, and the CosMx fields as written by `hp.io.cosmx`.
 - [ ] The package imports nothing from Harpy's other subpackages, only `spatialdata` and `pandas`, so
       that `harpy/__init__.py` can import it before them without circular imports.
-- [ ] Export both functions, and `hp.get_expression_class` of [section 5](#5-the-expression-class-of-a-cosmx-feature-panel),
-      from `harpy/__init__.py`, in `__all__`, and add them to the API documentation.
+- [ ] Export both functions from `harpy/__init__.py`, in `__all__`, and add them to the API
+      documentation.
 - [ ] Public docstrings say "coordinate systems with Harpy metadata", not "registered", which reads
       as image registration.
 - [ ] Close #292: the functions supersede its constants.
@@ -286,45 +277,12 @@ Acceptance:
 - [ ] The functions are documented and tested, including an element in no and in two coordinate
       systems with Harpy metadata.
 
-## 5. The expression class of a CosMx feature panel
-
-Files: [`_feature_panels.py`](../../src/harpy/_feature_panels.py),
-[`points/_feature_panel.py`](../../src/harpy/points/_feature_panel.py),
-[`table/_allocation.py`](../../src/harpy/table/_allocation.py) (docstring only), the new
-`src/harpy/metadata/` package, the CosMx reader and validator.
-
-- [ ] `_FeaturePanelContract` gets an optional `expression_class`, which must be one of its classes; it
-      is part of `to_dict()` and so of `storage_key`.
-- [ ] Parse and validate it wherever panels are read: `_parse_feature_panel`, the CosMx validator,
-      `hp.pt.validate_points`.
-- [ ] The reader records `"Endogenous"`, CosMx's gene class; see [Open](#open) for a plex without it.
-- [ ] `hp.pt.add_feature_panel` accepts an optional `expression_class`.
-- [ ] `src/harpy/metadata/`: `hp.get_expression_class(sdata, points_name) -> str`, the expression
-      class of the feature panel of `points_name`. It raises when the points have no panel, or their
-      panel records no expression class, and the message names the fix:
-      `hp.pt.add_feature_panel(..., expression_class=...)`. It reads the panel record only, so the
-      package still imports nothing from Harpy's other subpackages.
-- [ ] `hp.tb.aggregate_points` keeps its signature and behaviour; its docstring of `expression_class`
-      points to `hp.get_expression_class`.
-- [ ] Update the docstrings of `hp.io.cosmx` and `hp.pt.add_feature_panel`, which say that no
-      expression class is stored, and the feature-panel tree in `docs/development/metadata.md`.
-
-Acceptance:
-
-- [ ] A CosMx store's panel records its expression class.
-- [ ] Downstream code aggregates in class-aware mode with
-      `expression_class=hp.get_expression_class(sdata, points_name)`, without hard-coding
-      `"Endogenous"`.
-- [ ] `hp.get_expression_class` raises on points without a panel, and on a panel without an expression
-      class.
-
 ## Tests
 
 - [ ] `src/harpy/_tests/test_io/test_cosmx/`: the modules that assert on the record layout, the
       micron coordinate systems or `fov_bounds_px`.
 - [ ] `src/harpy/_tests/test_qc/test_points/test_summarize_points.py` and
       `test_summarize_points_by_feature.py`: the sample from the registry.
-- [ ] Feature-panel tests: the expression class in the contract and the key.
 - [ ] Each acceptance criterion above has a test.
 
 ## Handover to downstream code
@@ -343,7 +301,7 @@ When all of the above is done, downstream code replaces its workarounds:
 | Point summaries in µm                                           | pass the record's `microns_per_unit` to `hp.qc.summarize_points`                                                                                                       |
 | Regrouping element records into mosaics                         | `hp.get_coordinate_system_metadata`                                                                                                                                    |
 | Private constants and literals                                  | the two functions; the columns of the DataFrame are the contract                                                                                                       |
-| `"Endogenous"` as a constant                                    | `expression_class=hp.get_expression_class(sdata, points_name)`                                                                                                         |
+| `"Endogenous"` as a constant                                    | unchanged: it stays in the downstream configuration, passed as `expression_class=` to `hp.tb.aggregate_points`                                                         |
 
 Stores written before this change must be written again with the reader.
 
@@ -364,6 +322,10 @@ Stores written before this change must be written again with the reader.
 - A helper that adds a micron coordinate system from `microns_per_unit`.
 - The micron coordinate systems of the Xenium reader and the dataset loaders.
 - A `samples` level for the facts of the run.
+- The expression class in the feature panel, the former section 5 of #293. Which class goes into `X`
+  is a choice of the analysis, not a fact of the assay, and the current design chooses it when calling
+  `hp.tb.aggregate_points`. Recording it would change the content-hashed panel contract, and so every
+  panel key, to save downstream code one string constant.
 
 ## Log
 
@@ -373,3 +335,9 @@ Stores written before this change must be written again with the reader.
   constants dropped.
 - 2026-11-24: decided `hp.get_expression_class` instead of an option of `aggregate_points`; section 5
   updated.
+- 2026-11-24: decided the reader's behaviour for a plex without `Endogenous`; corrected the fix that
+  `hp.get_expression_class` names for a panel without an expression class. No open items left.
+- 2026-11-24: dropped section 5, the expression class in the feature panel, with the three decisions
+  above about it; see Out of scope. #293 updated to match.
+- 2026-11-24: #293 brought up to date with this spec: scope and compatibility, #276 in section 3, the
+  two `hp.get_*` functions and their package in section 4, and the handover table.
