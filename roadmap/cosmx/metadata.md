@@ -35,6 +35,8 @@ relative paths without line numbers, as the code moves while it changes.
       dropped. It stays a choice of the analysis, made when calling `hp.tb.aggregate_points`, as the
       docstrings of `hp.io.cosmx`, `hp.pt.add_feature_panel` and `aggregate_points` document now.
       Feature panels and `aggregate_points` are unchanged.
+- [x] `hp.qc.PointsSummaryMetadata` loses `sample_id`, a copy of a fact that the registry records
+      once; the sample of a summary follows from its `points_name`. This changes its public API.
 - [x] This document is deleted before merging.
 
 ## Open
@@ -145,83 +147,101 @@ Files: [`harpy/metadata/_registry.py`](../../src/harpy/metadata/_registry.py) (f
 Records:
 
 - [x] Add `coordinate_systems` to `_METADATA_REGISTRIES` (step 1, for the resolver).
-- [ ] Replace `_common_element_record` with a builder of the coordinate-system record of one mosaic,
-      with the fields of the [target layout](#target-layout).
-- [ ] Reduce element records to their own fields: images `channels`; labels `instance_id_encoding` or
+- [x] Replace `_common_element_record` with a builder of the coordinate-system record of one mosaic,
+      with the fields of the [target layout](#target-layout): `_coordinate_system_record`.
+- [x] Reduce element records to their own fields: images `channels`; labels `instance_id_encoding` or
       `categories`; points `feature_panel`. Without a feature panel, the reader writes no points record.
-- [ ] Rename `_FOV_BOUNDS_KEY` to `"fov_bounds"`.
+- [x] Rename `_FOV_BOUNDS_KEY` to `"fov_bounds"`.
+- [x] The keys of the record that code outside the reader reads, `_SAMPLE_ID_KEY`, `_MOSAIC_KEY` and
+      `_MICRONS_PER_UNIT_KEY`, are private constants in `harpy/metadata/_registry.py`, as `hp.qc` and
+      `harpy.metadata` cannot import from `harpy.io`. The CosMx-only keys, such as `_FOV_BOUNDS_KEY`,
+      stay in `io/_cosmx/_constants.py`.
 
 Writing:
 
-- [ ] `_commit_element_metadata` writes the mosaic's coordinate-system record in the same attributes
+- [x] `_commit_element_metadata` writes the mosaic's coordinate-system record in the same attributes
       write as the element. It inserts the record if absent, and raises if a different one is present.
       Its element record becomes optional, for points without a feature panel.
-- [ ] `add_cosmx_samples` checks new sample IDs against the `sample_id`s of the registry.
+- [x] `add_cosmx_samples` checks new sample IDs against the `sample_id`s of the registry.
 
 Validation, replacing `_validate_common_element_record`, `_validate_mosaic_consistency` and
 `_MOSAIC_FIELDS`:
 
-- [ ] At least one registered coordinate system, replacing the rule of at least one element record. A
+- [x] At least one registered coordinate system, replacing the rule of at least one element record. A
       store without the registry, such as one written before this change, fails with a message to write
       it again with the current reader.
-- [ ] The fields of each coordinate-system record, as the per-record checks do now.
-- [ ] Each registered coordinate system exists in `sdata.coordinate_systems`.
-- [ ] `(sample_id, mosaic)` is unique across the registry.
-- [ ] The facts of the run agree across the coordinate systems of a sample.
-- [ ] Each image and labels element with a record has an `Identity` to exactly one registered
+- [x] The fields of each coordinate-system record, as the per-record checks do now.
+- [x] Each registered coordinate system exists in `sdata.coordinate_systems`.
+- [x] `(sample_id, mosaic)` is unique across the registry.
+- [x] The facts of the run agree across the coordinate systems of a sample.
+- [x] Each image and labels element with a record has an `Identity` to exactly one registered
       coordinate system and no transformation to another; `fov_bounds` lie within its raster.
-- [ ] Points records: the feature-panel checks, as now. A points record needs no coordinate system, so
-      the record that `hp.pt.add_feature_panel` writes for another points element of the store is valid.
+- [x] Points records: the feature-panel checks. A points record needs no coordinate system, so the
+      record that `hp.pt.add_feature_panel` writes for another points element of the store is valid.
+      The panel columns are checked against Harpy's general panel contract, as
+      `hp.pt.validate_points` does: the feature-class column categorical, the feature column of any
+      dtype. The validator no longer requires a categorical feature column, which only the reader
+      guarantees, and which `add_feature_panel` does not require.
 
 Other readers of the moved fields:
 
-- [ ] `hp.qc.summarize_points` takes `PointsSummaryMetadata.sample_id` from the registered coordinate
-      system of the points element (`None` without one), no longer from the points record
-      (`_points_reduction.py`). `summarize_points_by_feature` compares against the same source.
+- [x] `hp.qc`: `PointsSummaryMetadata` no longer has `sample_id`, which it copied from the points
+      record. A summary names its `points_name`, from which the sample follows through the registry,
+      where it is recorded once. `summarize_points_by_feature` checks only that the panel key of a
+      reference summary still matches. `_resolve_points_feature_panel` returns `(panel_name, panel)`,
+      as no caller used the points record it also returned.
+- [x] `assign_cosmx_fovs` reads the registry: the lookup tasks of
+      [section 3](#3-assign_cosmx_fovs-reads-the-registry-and-writes-the-mosaic-of-each-row), done in
+      step 2, so that its tests pass at the end of step 2.
 
 Documentation:
 
-- [ ] The docstring of `hp.io.cosmx`: the tree, the note that elements are paired by `mosaic.number`,
+- [x] The docstring of `hp.io.cosmx`: the tree, the note that elements are paired by `mosaic.number`,
       and the note that coordinate systems are not part of the root metadata.
-- [ ] The `pixel_size_um` bullets in the docstrings of `_add_morphology_images`, the labels writers
+- [x] The docstring of `validate_cosmx_store`, which mentions element records and their agreement
+      within each mosaic.
+- [x] The `pixel_size_um` bullets in the docstrings of `_add_morphology_images`, the labels writers
       and `_add_transcript_points`.
-- [ ] [`docs/development/metadata.md`](../../docs/development/metadata.md).
+- [x] The comment above the record keys in `io/_cosmx/_constants.py`.
+- [x] [`docs/development/metadata.md`](../../docs/development/metadata.md).
 
 Acceptance:
 
-- [ ] A store written by the reader holds one coordinate-system record per mosaic, and element records
+- [x] A store written by the reader holds one coordinate-system record per mosaic, and element records
       hold only their own fields.
-- [ ] The validator passes on it, also after `hp.pt.add_feature_panel` registered another points
+- [x] The validator passes on it, also after `hp.pt.add_feature_panel` registered another points
       element, and `add_cosmx_samples` accepts that store.
-- [ ] The validator fails with a clear message on a store without the registry, on a registered
+- [x] The validator fails with a clear message on a store without the registry, on a registered
       coordinate system that no element has, on two records with the same `(sample_id, mosaic)`, and on a
       recorded image or labels element without an `Identity` to exactly one registered coordinate system.
-- [ ] `hp.qc.summarize_points` reports the sample of CosMx points.
+- [x] `hp.qc.PointsSummaryMetadata` has no `sample_id`, and the point summaries work as before.
 
 ## 2. No micron coordinate systems
 
-- [ ] `_images.py`, `_labels.py`, `_transcripts.py`: write each element only in its mosaic's pixel
+- [x] `_images.py`, `_labels.py`, `_transcripts.py`: write each element only in its mosaic's pixel
       coordinate system, with an `Identity`.
-- [ ] `_names.py`: remove `_micron_coordinate_system`, and the micron name from the module docstring.
-- [ ] `_reader.py`: plan only the pixel coordinate system in `_validate_planned_names`; update the
-      docstrings that mention micron coordinate systems.
-- [ ] `microns_per_unit` replaces `pixel_size_um` in the records. The run manifest's internal
+- [x] `_names.py`: remove `_micron_coordinate_system`, and the micron name from the module docstring.
+- [x] `_reader.py`: plan only the pixel coordinate system in `_validate_planned_names`; update the
+      docstrings that mention micron coordinate systems, also of `_validate_planned_names`.
+- [x] The docstrings of `CosmxSample.coordinate_system` (`_models.py`) and `_add_morphology_images`,
+      which mention the micron coordinate systems.
+- [x] `microns_per_unit` replaces `pixel_size_um` in the records. The run manifest's internal
       `pixel_size_um` can stay.
 
 Acceptance:
 
-- [ ] The reader writes no `_micron` coordinate system, and `_micron_coordinate_system` is gone.
+- [x] The reader writes no `_micron` coordinate system, and `_micron_coordinate_system` is gone.
 
 ## 3. `assign_cosmx_fovs` reads the registry and writes the mosaic of each row
 
 File: [`_fovs.py`](../../src/harpy/io/_cosmx/_fovs.py). Includes #276, the FOV column as a categorical.
 
-- [ ] Find the registered coordinate system of each labels element of the table, with the resolver of
-      [section 4](#4-public-functions-to-read-the-registry); a labels element in none, or in several,
-      raises.
-- [ ] Transform the canonical centers from the labels element into that coordinate system, and read
-      the bounds, the sample and the mosaic from its record.
-- [ ] Remove `_cosmx_image_of` and the requirement of a morphology image.
+- [x] Step 2: find the registered coordinate system of each labels element of the table, with the
+      resolver of [section 4](#4-public-functions-to-read-the-registry); a labels element in none, or
+      in several, raises.
+- [x] Step 2: transform the canonical centers from the labels element into that coordinate system,
+      and read the bounds and the sample from its record; the mosaic follows in step 3.
+- [x] Step 2: remove `_cosmx_image_of` and the requirement of a morphology image.
 - [ ] Add `mosaic_key: str = "mosaic"`, next to `fov_key` and `sample_key`. Write the mosaic number of
       every row, also of rows between FOVs, as a categorical with integer categories sorted numerically:
       the mosaics of the table's regions.
@@ -240,7 +260,7 @@ Acceptance:
 - [ ] A table over two mosaics of one sample gets the right mosaic per row, as a categorical, also for
       labels segmented on a crop.
 - [ ] Rows outside every FOV keep their sample and mosaic.
-- [ ] A store read with `images=False` works.
+- [x] A store read with `images=False` works (step 2).
 - [ ] The FOV column is a categorical with every FOV of the matched mosaics as a category, in numeric
       order, including FOVs without rows; rows outside every FOV have a missing value.
 - [ ] The FOV and mosaic columns keep their categories and missing values through a Zarr round trip.
@@ -288,9 +308,10 @@ Within the one PR, in this order, running the focused tests of each step:
 
 1. [x] Section 4's package: move `_metadata.py` to `src/harpy/metadata/_registry.py`, update its
        importers, and add the private resolver, which sections 1 and 3 use.
-2. [ ] Sections 1 and 2 together: the records, writing, the validator, `hp.qc.summarize_points`, and
-       the removal of the micron coordinate systems.
-3. [ ] Section 3: `assign_cosmx_fovs`, with #276.
+2. [x] Sections 1 and 2 together: the records, writing, the validator, `hp.qc.summarize_points`, the
+       removal of the micron coordinate systems, and the lookup of `assign_cosmx_fovs` through the
+       registry (section 3's first three tasks).
+3. [ ] The rest of section 3: the mosaic column of `assign_cosmx_fovs`, and #276.
 4. [ ] Section 4's public functions, the API documentation, and the handover.
 5. [ ] A broader test run at the end, as the move touches about ten modules; ask before running the
        full suite.
@@ -298,9 +319,9 @@ Within the one PR, in this order, running the focused tests of each step:
 ## Tests
 
 - [ ] `src/harpy/_tests/test_metadata/`: the tests of the new package.
-- [ ] `src/harpy/_tests/test_io/test_cosmx/`: the modules that assert on the record layout, the
+- [x] `src/harpy/_tests/test_io/test_cosmx/`: the modules that assert on the record layout, the
       micron coordinate systems or `fov_bounds_px`.
-- [ ] `src/harpy/_tests/test_qc/test_points/test_summarize_points.py` and
+- [x] `src/harpy/_tests/test_qc/test_points/test_summarize_points.py` and
       `test_summarize_points_by_feature.py`: the sample from the registry.
 - [ ] Each acceptance criterion above has a test.
 
@@ -308,19 +329,20 @@ Within the one PR, in this order, running the focused tests of each step:
 
 When all of the above is done, downstream code replaces its workarounds:
 
-| Today                                                           | After #293                                                                                                                                                             |
-| --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Mosaic of a table's rows through the points element's record    | `obs[sample_key]` and `obs[mosaic_key]` from `hp.io.assign_cosmx_fovs`                                                                                                 |
-| Casting the FOV column to a categorical after assigning         | `obs[fov_key]` is already categorical                                                                                                                                  |
-| Mosaic of a table or labels element                             | `hp.get_element_coordinate_system`, or the `coordinate_system` that `uns["point_aggregation"]` records per region; then its row of `hp.get_coordinate_system_metadata` |
-| Morphology image of a mosaic                                    | the image with a record in `images` and a transformation to the mosaic's coordinate system                                                                             |
-| Pixel coordinate system from a template or an `Identity` search | the index of `hp.get_coordinate_system_metadata`                                                                                                                       |
-| Micron coordinate system, `_micron`                             | `microns_per_unit` of the record                                                                                                                                       |
-| Areas in µm² from the micron transformation                     | area in pixels × determinant of the transformation to the coordinate system × `microns_per_unit`²                                                                      |
-| Point summaries in µm                                           | pass the record's `microns_per_unit` to `hp.qc.summarize_points`                                                                                                       |
-| Regrouping element records into mosaics                         | `hp.get_coordinate_system_metadata`                                                                                                                                    |
-| Private constants and literals                                  | the two functions; the columns of the DataFrame are the contract                                                                                                       |
-| `"Endogenous"` as a constant                                    | unchanged: it stays in the downstream configuration, passed as `expression_class=` to `hp.tb.aggregate_points`                                                         |
+| Today                                                           | After #293                                                                                                                                                                                                        |
+| --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Mosaic of a table's rows through the points element's record    | `obs[sample_key]` and `obs[mosaic_key]` from `hp.io.assign_cosmx_fovs`                                                                                                                                            |
+| Casting the FOV column to a categorical after assigning         | `obs[fov_key]` is already categorical                                                                                                                                                                             |
+| Mosaic of a table or labels element                             | `hp.get_element_coordinate_system`, or the `coordinate_system` that `uns["point_aggregation"]` records per region; then its row of `hp.get_coordinate_system_metadata`                                            |
+| Morphology image of a mosaic                                    | the image with a record in `images` and a transformation to the mosaic's coordinate system                                                                                                                        |
+| Pixel coordinate system from a template or an `Identity` search | the index of `hp.get_coordinate_system_metadata`                                                                                                                                                                  |
+| Micron coordinate system, `_micron`                             | `microns_per_unit` of the record                                                                                                                                                                                  |
+| Areas in µm² from the micron transformation                     | area in pixels × determinant of the transformation to the coordinate system × `microns_per_unit`²                                                                                                                 |
+| Point summaries in µm                                           | pass the record's `microns_per_unit` to `hp.qc.summarize_points`                                                                                                                                                  |
+| Sample of a points summary, `summary.metadata.sample_id`        | the sample of its points element: its row of `hp.get_coordinate_system_metadata` at `hp.get_element_coordinate_system(sdata, summary.metadata.points_name)`; or `obs[sample_key]` after `hp.io.assign_cosmx_fovs` |
+| Regrouping element records into mosaics                         | `hp.get_coordinate_system_metadata`                                                                                                                                                                               |
+| Private constants and literals                                  | the two functions; the columns of the DataFrame are the contract                                                                                                                                                  |
+| `"Endogenous"` as a constant                                    | unchanged: it stays in the downstream configuration, passed as `expression_class=` to `hp.tb.aggregate_points`                                                                                                    |
 
 Stores written before this change must be written again with the reader.
 
@@ -341,6 +363,10 @@ Stores written before this change must be written again with the reader.
 - A helper that adds a micron coordinate system from `microns_per_unit`.
 - The micron coordinate systems of the Xenium reader and the dataset loaders.
 - A `samples` level for the facts of the run.
+- A content check, under `check_point_contents` of `validate_cosmx_store`, that a mosaic's transcripts
+  lie within its FOV bounds. The structural check does not validate the placement of points: a points
+  record need not be written by `hp.io.cosmx`, and points have no shape to hold the bounds against
+  without reading their coordinates. Nothing reads `fov_bounds` in relation to points.
 - The expression class in the feature panel, the former section 5 of #293. Which class goes into `X`
   is a choice of the analysis, not a fact of the assay, and the current design chooses it when calling
   `hp.tb.aggregate_points`. Recording it would change the content-hashed panel contract, and so every
@@ -366,3 +392,20 @@ Stores written before this change must be written again with the reader.
   `src/harpy/metadata/_coordinate_systems.py`, with tests in
   `src/harpy/_tests/test_metadata/test_coordinate_systems.py`. Focused tests of the registry's
   importers pass (557).
+- 2026-11-24: before step 2: section 3's lookup moved into step 2; the shared record keys go in
+  `harpy/metadata/_registry.py`; `summarize_points` propagates the resolver's error; four more
+  docstrings listed.
+- 2026-11-24: step 2 done. The reader writes one coordinate-system record per mosaic, element records
+  hold only their own fields, and no micron coordinate systems are written; the validator, the
+  docstrings, `docs/development/metadata.md`, `hp.qc` and the lookup of `assign_cosmx_fovs` follow.
+  Decided while implementing: the validator checks points records against Harpy's general panel
+  contract, so a categorical feature column is no longer required; a missing `fov_bounds` asks to
+  rewrite the store, without mentioning older versions. New tests: the validator's new failures and
+  its acceptance of `add_feature_panel` records, the shared and conflicting coordinate-system
+  record of two label products, the rollback of a mosaic's record with its first element,
+  `add_cosmx_samples` on a store with `add_feature_panel` records, and `assign_cosmx_fovs` on a
+  rescaled mask, without an image, and with a mask in none or two recorded coordinate systems.
+  Focused tests of all modules touched in steps 1 and 2 pass (714).
+- 2026-11-24: docstrings name `harpy.io.cosmx` instead of "the reader". Decided to remove `sample_id`
+  from `hp.qc.PointsSummaryMetadata`, and with it `_element_sample_id`; `_resolve_points_feature_panel`
+  no longer returns the points record. Handover row added. Focused tests pass (767).

@@ -12,14 +12,15 @@ present only when the corresponding operation creates them.
 sdata.attrs["harpy"]
 ├── metadata_version
 ├── provenance                         reader identity and Harpy version
+├── coordinate_systems
+│   └── <coordinate system name>        one per mosaic: sample_id, mosaic,
+│                                      microns_per_unit, and reader fields
 ├── images
-│   └── <image name>                    source/selection metadata, channels
+│   └── <image name>                    channels
 ├── labels
-│   └── <labels name>                   source/selection metadata,
-│                                      instance-ID encoding or categories
+│   └── <labels name>                   instance-ID encoding or categories
 ├── points
 │   ├── <points name A>
-│   │   ├── ...                        optional source/selection metadata
 │   │   └── feature_panel: <panel key>
 │   └── <points name B>
 │       └── feature_panel: <panel key>  same panel may be shared
@@ -34,10 +35,20 @@ sdata.attrs["harpy"]
 Each points record's `feature_panel` value names a record in the shared
 `feature_panels` registry. Multiple points elements can reference the same panel.
 
-Image, labels and points records use exact element names. Source/selection
-metadata may describe sample identity, selected data, geometry or acquisition
-information. The available fields depend on the writer; a panel association
-does not require reader-specific metadata.
+Image, labels and points records use exact element names and hold only the
+fields of their element, such as its channels. The available fields depend on
+the writer; a panel association does not require reader-specific metadata.
+
+The facts that several elements share, such as the sample, the mosaic and the
+pixel size of a CosMx mosaic, are recorded once, in `coordinate_systems`, under
+the name of the coordinate system in which the reader writes those elements.
+An element belongs to the record of the one coordinate system with a record to
+which it has a transformation. Harpy's functions copy an element's
+transformations to the elements they derive from it, so a segmentation of a
+morphology image, also of a crop, finds the same record; no element records
+its mosaic. `microns_per_unit` gives the micrometers per unit of the coordinate
+system. The reader adds fields of its own, documented in its docstring, such
+as the FOVs of a CosMx mosaic and their bounds.
 
 The panel is authoritative for feature-to-class assignments and may include
 features with no detected points. The class column in the points dataframe is
