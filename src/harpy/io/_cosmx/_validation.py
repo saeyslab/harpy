@@ -19,6 +19,9 @@ from harpy.io._cosmx._constants import (
     _FOV_BOUNDS_FIELDS,
     _FOV_BOUNDS_KEY,
     _INSTANCE_ID_FORMULA,
+    _MICRONS_PER_UNIT_KEY,
+    _MOSAIC_KEY,
+    _SAMPLE_ID_KEY,
 )
 from harpy.io._cosmx._models import _INSTANCE_ID_DTYPE, _MOSAIC_MODES, _validate_identifier
 from harpy.metadata._registry import (
@@ -29,11 +32,8 @@ from harpy.metadata._registry import (
     _LABELS_METADATA_KEY,
     _METADATA_VERSION,
     _METADATA_VERSION_KEY,
-    _MICRONS_PER_UNIT_KEY,
-    _MOSAIC_KEY,
     _POINTS_METADATA_KEY,
     _PROVENANCE_METADATA_KEY,
-    _SAMPLE_ID_KEY,
 )
 
 _ELEMENT_REGISTRIES = (_IMAGES_METADATA_KEY, _LABELS_METADATA_KEY, _POINTS_METADATA_KEY)
