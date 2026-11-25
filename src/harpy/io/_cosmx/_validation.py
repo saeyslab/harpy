@@ -24,6 +24,7 @@ from harpy.io._cosmx._constants import (
     _SAMPLE_ID_KEY,
 )
 from harpy.io._cosmx._models import _INSTANCE_ID_DTYPE, _MOSAIC_MODES, _validate_identifier
+from harpy.metadata import validate_coordinate_system_metadata
 from harpy.metadata._registry import (
     _COORDINATE_SYSTEMS_METADATA_KEY,
     _FEATURE_PANELS_METADATA_KEY,
@@ -50,8 +51,10 @@ def validate_cosmx_store(
     """Validate a sample-aware CosMx SpatialData Zarr store without modifying it.
 
     Structural validation checks the Harpy metadata version and provenance;
-    the record of each mosaic's coordinate system, and the agreement of the
-    records of one sample; that each recorded image and labels element lies
+    the rules of :func:`harpy.validate_coordinate_system_metadata`, which hold
+    whoever writes the metadata of coordinate systems; the record of each
+    mosaic's coordinate system, and the agreement of the records of one
+    sample; that each recorded image and labels element lies
     unscaled in exactly one recorded coordinate system, within whose FOV
     bounds it extends; label-family metadata; feature-panel records; and
     referenced points schemas. It reads array and dataframe metadata but does
@@ -85,7 +88,10 @@ def validate_cosmx_store(
     -----
     This function never writes attributes or elements and does not repair or
     migrate invalid stores. Elements without a record, such as downstream
-    segmentations, are permitted and not checked. A points record needs no
+    segmentations, are permitted; of the checks above, only the rules of
+    :func:`harpy.validate_coordinate_system_metadata` apply to them, so such an
+    element must not lie in two coordinate systems with Harpy metadata. A
+    points record needs no
     coordinate system, so the record that :func:`harpy.pt.add_feature_panel`
     writes for another points element is valid.
     """
@@ -151,7 +157,9 @@ def _validate_cosmx_sdata(
             "rewrite the store."
         )
 
-    sample_ids = _validate_coordinate_system_records(sdata, coordinate_systems)
+    # The rules for whoever writes the metadata of coordinate systems, then those for what hp.io.cosmx writes.
+    validate_coordinate_system_metadata(sdata)
+    sample_ids = _validate_coordinate_system_records(coordinate_systems)
     panels = _validate_feature_panels(registries[_FEATURE_PANELS_METADATA_KEY])
     _validate_image_records(sdata, registries[_IMAGES_METADATA_KEY], coordinate_systems=coordinate_systems)
     _validate_labels_records(sdata, registries[_LABELS_METADATA_KEY], coordinate_systems=coordinate_systems)
@@ -164,10 +172,11 @@ def _validate_cosmx_sdata(
     return frozenset(sample_ids)
 
 
-def _validate_coordinate_system_records(sdata: SpatialData, records: Mapping[str, object]) -> set[str]:
+def _validate_coordinate_system_records(records: Mapping[str, object]) -> set[str]:
     """Validate the record of each mosaic's coordinate system and their agreement; return the sample IDs.
 
-    Each record must name a coordinate system of ``sdata``. A mosaic has one
+    Call after :func:`harpy.validate_coordinate_system_metadata`, which checks
+    that each record names a coordinate system of ``sdata``. A mosaic has one
     coordinate system, so ``(sample_id, mosaic)`` is unique across the records.
     The facts of a run, ``_RUN_FIELDS``, are the same in each coordinate system
     of its sample; the first record of a sample is the reference for the others.
@@ -182,18 +191,11 @@ def _validate_coordinate_system_records(sdata: SpatialData, records: Mapping[str
             -> ValueError: ...coordinate_systems['s1_global_2'].microns_per_unit differs from
                ...coordinate_systems['s1_global_1'].microns_per_unit ...
     """
-    existing_coordinate_systems = set(sdata.coordinate_systems)
     coordinate_system_of_mosaic: dict[tuple[str, int], str] = {}
     first_of_sample: dict[str, tuple[str, Mapping[str, Any]]] = {}
     for name, value in records.items():
         path = _coordinate_system_path(name)
         record = _require_mapping(value, path=path)
-        if name not in existing_coordinate_systems:
-            raise ValueError(
-                f"CosMx metadata {path} records coordinate system {name!r}, to which no element of sdata has a "
-                "transformation. Restore the elements of that mosaic, or run the CosMx reader again to rewrite the "
-                "store."
-            )
         sample_id, mosaic = _validate_coordinate_system_record(record, path=path)
         other = coordinate_system_of_mosaic.setdefault((sample_id, mosaic), name)
         if other != name:
