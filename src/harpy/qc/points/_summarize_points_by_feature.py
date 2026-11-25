@@ -36,7 +36,7 @@ class FeaturePointsSummary:
     Attributes
     ----------
     metadata
-        One :class:`~harpy.qc.PointsSummaryMetadata` holding source/panel/sample
+        One :class:`~harpy.qc.PointsSummaryMetadata` holding source and panel
         identity, coordinate system, crop, physical calibration and bin edges.
         Nested arrays and dataframes do not duplicate this context in ``attrs``.
     per_feature
@@ -191,14 +191,14 @@ def _reduce_points_by_feature(
     ``_compute_point_reductions()`` for the shared partition validation/count
     pass. Entirely undetected features remain valid on this reference grid.
     """
-    # Check that the panel key and sample ID saved in summary.metadata still
-    # match the current metadata for this points element in sdata.
+    # Check that the panel key saved in summary.metadata still matches the
+    # current panel of this points element in sdata.
     # This does not detect changes to point rows or coordinate transformations.
     metadata = summary.metadata
     if metadata.points_name not in sdata.points:
         raise ValueError(f"Points element {metadata.points_name!r} does not exist.")
-    panel_name, panel, points_record = _resolve_points_feature_panel(sdata, metadata.points_name)
-    if panel_name != metadata.feature_panel or points_record.get("sample_id") != metadata.sample_id:
+    panel_name, panel = _resolve_points_feature_panel(sdata, metadata.points_name)
+    if panel_name != metadata.feature_panel:
         raise ValueError("The reference summary's source metadata no longer matches; recompute summarize_points().")
     # Compare assignments only for classes represented in the supplied summary.
     # For example, an Endogenous-only summary might contain:

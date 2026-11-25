@@ -48,7 +48,7 @@ def validate_points(sdata: SpatialData, points_name: str) -> None:
         raise ValueError(f"Points element {points_name!r} does not exist.")
     points = sdata.points[points_name]
     PointsModel.validate(points)
-    _, panel, _ = _resolve_points_feature_panel(sdata, points_name)
+    _, panel = _resolve_points_feature_panel(sdata, points_name)
     columns = [panel.feature_key, panel.feature_class_key]
     for key in columns:
         if key not in points.columns:

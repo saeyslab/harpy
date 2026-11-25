@@ -11,9 +11,9 @@ class PointsSummaryMetadata:
 
     Attributes
     ----------
-    points_name, sample_id, feature_panel
-        Source points name, optional sample identity, and referenced panel key.
-        These describe the computation's inputs, not a live metadata lookup.
+    points_name, feature_panel
+        Source points name and referenced panel key. These describe the
+        computation's inputs, not a live metadata lookup.
     to_coordinate_system
         Requested coordinate system, used whenever cropping or binning occurs.
         All bin coordinates and edges use this frame and its units.
@@ -34,7 +34,6 @@ class PointsSummaryMetadata:
     """
 
     points_name: str
-    sample_id: str | None
     feature_panel: str
     # Keep one coordinate context for the grid, bin tables and crop, even without
     # binning; duplicating it in DataArray.attrs would require synchronization.

@@ -1,3 +1,5 @@
+"""The keys, version and registries of Harpy's metadata in ``sdata.attrs["harpy"]``."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -12,11 +14,13 @@ _IMAGES_METADATA_KEY = "images"
 _LABELS_METADATA_KEY = "labels"
 _POINTS_METADATA_KEY = "points"
 _FEATURE_PANELS_METADATA_KEY = "feature_panels"
+_COORDINATE_SYSTEMS_METADATA_KEY = "coordinate_systems"
 _METADATA_REGISTRIES = (
     _IMAGES_METADATA_KEY,
     _LABELS_METADATA_KEY,
     _POINTS_METADATA_KEY,
     _FEATURE_PANELS_METADATA_KEY,
+    _COORDINATE_SYSTEMS_METADATA_KEY,
 )
 
 

@@ -10,18 +10,19 @@ import pandas as pd
 from dask.dataframe import DataFrame as DaskDataFrame
 from dask.utils import parse_bytes
 from spatialdata import SpatialData
-from spatialdata.transformations import Identity, Scale
+from spatialdata.transformations import Identity
 
 from harpy._feature_panels import _parse_feature_panel_registry, _validate_feature_panel_collision
-from harpy._metadata import (
+from harpy.io._cosmx._metadata import _commit_element_metadata, _coordinate_system_record
+from harpy.io._cosmx._models import _CosmxPreview
+from harpy.io._cosmx._names import _element_name, _pixel_coordinate_system
+from harpy.metadata._registry import (
+    _COORDINATE_SYSTEMS_METADATA_KEY,
     _FEATURE_PANELS_METADATA_KEY,
     _HARPY_METADATA_KEY,
     _POINTS_METADATA_KEY,
     _validate_metadata_destination,
 )
-from harpy.io._cosmx._metadata import _commit_element_metadata, _common_element_record
-from harpy.io._cosmx._models import _CosmxPreview
-from harpy.io._cosmx._names import _element_name, _micron_coordinate_system, _pixel_coordinate_system
 from harpy.points._points import add_points
 
 _SOURCE_COLUMNS = ("V1", "CellComp", "codeclass", "target", "x", "y", "z")
@@ -67,29 +68,19 @@ def _add_transcript_points(
     parse time. Instance assignment is a downstream spatial operation against
     the final label raster, while FOV routing comes from the validated manifest.
 
-    Each points element receives a root metadata record containing:
+    Each points element is written unscaled in its mosaic's pixel coordinate
+    system, in mosaic-local coordinates starting at ``(0, 0)``. The record of
+    that coordinate system in ``sdata.attrs["harpy"]["coordinate_systems"]``
+    holds the facts of the mosaic, such as its ``sample_id``, ``mosaic``
+    number, ``microns_per_unit`` and ``fov_bounds``; see
+    :func:`harpy.io.cosmx`.
 
-    - ``fovs``: source FOV numbers contributing to the mosaic;
-    - ``sample_id`` and ``mosaic``: the sample identity and the grouping
-      mode/effective adjacency tolerance;
-    - ``source_origin_px``: upper-left mosaic bound in the pre-group/source
-      pixel coordinate system. This origin is subtracted from every FOV
-      position so that the output points use mosaic-local coordinates starting
-      at ``(0, 0)``. It is source-geometry metadata, not an active SpatialData
-      transformation;
-    - ``fov_bounds_px``: each FOV's half-open pixel bounds ``y0``, ``x0``,
-      ``y1``, ``x1`` in the mosaic-local frame of the points, keyed by FOV
-      number as a string. They equal the bounds of the mosaic's rasters;
-    - ``orientation``: dataset-wide local x/y-axis flips applied before each
-      FOV placement is added;
-    - ``pixel_size_um``: physical size of one source x/y coordinate unit;
-    - ``acquisition_timestamp`` when available: the consistent source
-      ``OrigTimeStamp`` value preserved verbatim; and
-    - ``feature_panel`` when authoritative panel metadata is available: the
-      key of the shared record in ``harpy.feature_panels``. That record maps
-      every assay-defined transcript feature to one class, including features
-      with zero detections. It describes assay features, not
-      individual physical probes.
+    When authoritative panel metadata is available, the element's own record
+    holds ``feature_panel``: the key of the shared record in
+    ``harpy.feature_panels``. That record maps every assay-defined transcript
+    feature to one class, including features with zero detections. It
+    describes assay features, not individual physical probes. Without a panel,
+    the element has no record.
 
     Parameters
     ----------
@@ -102,7 +93,7 @@ def _add_transcript_points(
     output_points_name
         Base points-element name; ``_mosaic_<n>`` is appended per mosaic.
     coordinate_system
-        Base name for independent pixel and physical coordinate systems.
+        Base name for each mosaic's own pixel coordinate system, ``<base>_n``.
     flip_x, flip_y
         Dataset-wide local-coordinate flips. These must match image and label
         ingestion.
@@ -127,7 +118,9 @@ def _add_transcript_points(
         raise ValueError("CosMx coordinate-system base name must not be empty.")
 
     _validate_blocksize(blocksize)
-    _validate_metadata_destination(sdata, _POINTS_METADATA_KEY, _FEATURE_PANELS_METADATA_KEY)
+    _validate_metadata_destination(
+        sdata, _POINTS_METADATA_KEY, _FEATURE_PANELS_METADATA_KEY, _COORDINATE_SYSTEMS_METADATA_KEY
+    )
 
     output_element_names = tuple(_element_name(output_points_name, mosaic.mosaic) for mosaic in preview.mosaics)
     existing = {name: element_type for element_type, name, _ in sdata.gen_elements() if name in output_element_names}
@@ -153,9 +146,10 @@ def _add_transcript_points(
     class_by_feature = None if panel is None else panel.class_by_feature
 
     for mosaic, output_element_name in zip(preview.mosaics, output_element_names, strict=True):
-        metadata = _common_element_record(preview, mosaic, sample_id=sample_id, flip_x=flip_x, flip_y=flip_y)
-        if panel_name is not None:
-            metadata["feature_panel"] = panel_name
+        pixel_coordinate_system = _pixel_coordinate_system(coordinate_system, mosaic.mosaic)
+        coordinate_system_record = _coordinate_system_record(
+            preview, mosaic, sample_id=sample_id, flip_x=flip_x, flip_y=flip_y
+        )
         frames = [
             _read_fov_transcripts(
                 sources[fov],
@@ -172,26 +166,19 @@ def _add_transcript_points(
             for fov in mosaic.fovs
         ]
         points = frames[0] if len(frames) == 1 else dd.concat(frames, axis=0, interleave_partitions=True)
-        pixel_coordinate_system = _pixel_coordinate_system(coordinate_system, mosaic.mosaic)
-        micron_coordinate_system = _micron_coordinate_system(pixel_coordinate_system)
         sdata = add_points(
             sdata,
             ddf=points,
             output_points_name=output_element_name,
             coordinates={"x": "x", "y": "y"},
-            transformations={
-                pixel_coordinate_system: Identity(),
-                micron_coordinate_system: Scale(
-                    [preview.manifest.run.pixel_size_um, preview.manifest.run.pixel_size_um],
-                    axes=("x", "y"),
-                ),
-            },
+            transformations={pixel_coordinate_system: Identity()},
         )
         _commit_element_metadata(
             sdata,
+            coordinate_system=(pixel_coordinate_system, coordinate_system_record),
             registry=_POINTS_METADATA_KEY,
             element_name=output_element_name,
-            record=metadata,
+            record=None if panel_name is None else {"feature_panel": panel_name},
             reader_version=reader_version,
             feature_panel=(panel_name, panel_record) if panel_name is not None and panel_record is not None else None,
         )

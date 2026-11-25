@@ -9,12 +9,14 @@ import numpy as np
 import pandas as pd
 import pytest
 from spatialdata import SpatialData, read_zarr
+from spatialdata.models import PointsModel
 from spatialdata.transformations import Identity, get_transformation
 
 from harpy import __version__
 from harpy.image._image import add_image, get_dataarray
 from harpy.io import CosmxSample, add_cosmx_samples, cosmx, validate_cosmx_store
 from harpy.io._cosmx import _reader
+from harpy.points import add_feature_panel
 
 
 def test_add_cosmx_samples_preserves_existing_sample_and_adds_independent_sample(
@@ -34,6 +36,7 @@ def test_add_cosmx_samples_preserves_existing_sample_and_adds_independent_sample
     original_name = "sample_a_morphology_image_mosaic_1"
     original_data = get_dataarray(original, original_name).compute().values.copy()
     original_metadata = deepcopy(original.attrs["harpy"]["images"][original_name])
+    original_record = deepcopy(original.attrs["harpy"]["coordinate_systems"]["sample_a_global_1"])
 
     def fail_staging(*args: object, **kwargs: object) -> None:
         raise AssertionError("Incremental addition attempted whole-store publication.")
@@ -53,9 +56,10 @@ def test_add_cosmx_samples_preserves_existing_sample_and_adds_independent_sample
     assert set(result.images) == {original_name, "sample_b_morphology_image_mosaic_1"}
     np.testing.assert_array_equal(get_dataarray(result, original_name).compute(), original_data)
     assert result.attrs["harpy"]["images"][original_name] == original_metadata
+    assert result.attrs["harpy"]["coordinate_systems"]["sample_a_global_1"] == original_record
+    assert result.attrs["harpy"]["coordinate_systems"]["sample_b_pixels_1"]["sample_id"] == "sample_b"
     assert set(get_transformation(result.images["sample_b_morphology_image_mosaic_1"], get_all=True)) == {
-        "sample_b_pixels_1",
-        "sample_b_pixels_1_micron",
+        "sample_b_pixels_1"
     }
     assert result.attrs["harpy"]["provenance"] == {"reader": "cosmx", "reader_version": __version__}
     validate_cosmx_store(output)
@@ -172,7 +176,7 @@ def test_add_cosmx_samples_rejects_existing_namespace_collisions(
 
     reopened = read_zarr(output)
     assert set(reopened.images) == {"sample_a_morphology_image_mosaic_1", unrelated_name}
-    assert "sample_b" not in {record["sample_id"] for record in reopened.attrs["harpy"]["images"].values()}
+    assert "sample_b" not in {record["sample_id"] for record in reopened.attrs["harpy"]["coordinate_systems"].values()}
 
 
 def test_add_cosmx_samples_reuses_identical_panels_and_separates_different_panels(
@@ -218,6 +222,52 @@ def test_add_cosmx_samples_reuses_identical_panels_and_separates_different_panel
     assert {record["feature_panel"] for record in result.attrs["harpy"]["points"].values()} == panel_names
 
 
+def test_add_cosmx_samples_accepts_points_registered_with_add_feature_panel(
+    decoded_cosmx_path: Path,
+    tmp_path: Path,
+) -> None:
+    source = _write_valid_transcripts(decoded_cosmx_path)
+    output = tmp_path / "registered_points.zarr"
+    sdata = cosmx(
+        {"sample_a": CosmxSample(path=source, fovs=[1])},
+        output,
+        images=False,
+        instance_labels=False,
+        compartment_labels=False,
+        points_blocksize=64,
+    )
+    panel_name = sdata.attrs["harpy"]["points"]["sample_a_transcripts_mosaic_1"]["feature_panel"]
+    panel = sdata.attrs["harpy"]["feature_panels"][panel_name]
+    # Points that are not the reader's, registered with the same panel, and placed in no recorded coordinate system.
+    sdata.points["filtered_transcripts"] = PointsModel.parse(
+        pd.DataFrame({"x": [1.0], "y": [2.0], "gene": ["Gene1"]}), transformations={"aligned": Identity()}
+    )
+    sdata.write_element("filtered_transcripts")
+    add_feature_panel(
+        sdata,
+        "filtered_transcripts",
+        feature_key=panel["feature_key"],
+        feature_class_key=panel["feature_class_key"],
+        features_by_class=panel["features_by_class"],
+    )
+
+    result = add_cosmx_samples(
+        output,
+        {"sample_b": CosmxSample(path=source, fovs=[2])},
+        images=False,
+        instance_labels=False,
+        compartment_labels=False,
+        points_blocksize=64,
+    )
+
+    assert {record["sample_id"] for record in result.attrs["harpy"]["coordinate_systems"].values()} == {
+        "sample_a",
+        "sample_b",
+    }
+    assert result.attrs["harpy"]["points"]["filtered_transcripts"] == {"feature_panel": panel_name}
+    validate_cosmx_store(output)
+
+
 def test_add_cosmx_samples_later_element_failure_retains_preceding_commit_and_rejects_retry(
     decoded_cosmx_path: Path,
     tmp_path: Path,
@@ -250,7 +300,7 @@ def test_add_cosmx_samples_later_element_failure_retains_preceding_commit_and_re
 
     partial = read_zarr(output)
     assert "sample_b_morphology_image_mosaic_1" in partial.images
-    assert partial.attrs["harpy"]["images"]["sample_b_morphology_image_mosaic_1"]["sample_id"] == "sample_b"
+    assert partial.attrs["harpy"]["coordinate_systems"]["sample_b_global_1"]["sample_id"] == "sample_b"
     assert not any(name.startswith("sample_b_") for name in partial.labels)
     assert partial.attrs["harpy"]["provenance"]["reader_version"] == "incremental-test-version"
     validate_cosmx_store(output)
@@ -397,6 +447,9 @@ def test_add_cosmx_samples_commits_each_mosaic_element_independently(
     assert "sample_b_morphology_image_mosaic_2" not in partial.images
     assert "sample_b_morphology_image_mosaic_1" in partial.attrs["harpy"]["images"]
     assert "sample_b_morphology_image_mosaic_2" not in partial.attrs["harpy"]["images"]
+    # The record of a mosaic's coordinate system is committed, and rolled back, with its first element.
+    assert "sample_b_global_1" in partial.attrs["harpy"]["coordinate_systems"]
+    assert "sample_b_global_2" not in partial.attrs["harpy"]["coordinate_systems"]
     validate_cosmx_store(output)
 
 

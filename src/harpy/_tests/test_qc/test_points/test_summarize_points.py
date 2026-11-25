@@ -69,7 +69,7 @@ def _sdata(frame=None, *, panel=None, npartitions=3):
 
     The default ``PANEL`` also contains undetected features: ZeroGene
     (Endogenous), NegC (Negative), SysB (SystemControl), and NoCalls
-    (EmptyClass). It is registered as ``panel_a`` for sample ``sample_a``.
+    (EmptyClass). It is registered as ``panel_a``.
 
     Supplying ``frame`` replaces the default point rows, not the panel;
     supplying ``panel`` independently replaces the panel record.
@@ -82,7 +82,7 @@ def _sdata(frame=None, *, panel=None, npartitions=3):
         attrs={
             "harpy": {
                 "metadata_version": 1,
-                "points": {"calls": {"feature_panel": "panel_a", "sample_id": "sample_a"}},
+                "points": {"calls": {"feature_panel": "panel_a"}},
                 "feature_panels": {"panel_a": deepcopy(PANEL if panel is None else panel)},
             }
         },
@@ -120,7 +120,6 @@ def test_summary_returns_complete_panel_counts_and_class_statistics():
     assert classes.loc["EmptyClass", "mean_points_per_feature"] == 0
     assert np.isnan(classes.loc["EmptyClass", "pct_points_top_n_features"])
     assert result.metadata.points_name == "calls"
-    assert result.metadata.sample_id == "sample_a"
     assert result.metadata.feature_panel == "panel_a"
     assert result.metadata.crd is None
     assert result.metadata.extent is None
@@ -137,7 +136,6 @@ def test_summary_metadata_matches_request(bin_size):
     assert isinstance(metadata, hp.qc.PointsSummaryMetadata)
     assert metadata.points_name == "calls"
     assert metadata.feature_panel == "panel_a"
-    assert metadata.sample_id == "sample_a"
     assert metadata.to_coordinate_system == "global"
     assert metadata.crd == hp.SpatialBounds(x=(0, 8), y=(0, 2))
     assert metadata.microns_per_unit == 0.5
@@ -154,7 +152,7 @@ def test_summary_metadata_matches_request(bin_size):
         frames.extend([result.spatial_bins.per_bin, result.spatial_bins.per_class])
     for frame in frames:
         assert not frame.attrs
-        assert not {"points_name", "sample_id", "feature_panel", "to_coordinate_system"} & set(frame.columns)
+        assert not {"points_name", "feature_panel", "to_coordinate_system"} & set(frame.columns)
 
 
 def test_retained_bin_mask_uses_any_selected_class_and_preserves_coordinates():
@@ -689,11 +687,9 @@ def test_custom_source_keys_and_unknown_dask_categories():
     points = dd.from_pandas(frame, npartitions=3)
     points["kind"] = points["kind"].cat.as_unknown()
     sdata = _sdata(points, panel=panel)
-    del sdata.attrs["harpy"]["points"]["calls"]["sample_id"]
     result = hp.qc.summarize_points(sdata, "calls")
     assert {"feature", "feature_class", "n_points"} <= set(result.per_feature.columns)
-    assert not {"marker", "kind", "sample_id"} & set(result.per_feature.columns)
-    assert result.metadata.sample_id is None
+    assert not {"marker", "kind"} & set(result.per_feature.columns)
     assert result.per_feature.n_points.sum() == 8
 
 
@@ -865,9 +861,8 @@ def test_summary_does_not_mutate_points_metadata_or_backing_store(tmp_path, monk
     assert not sdata.images and not sdata.labels and not sdata.tables
 
 
-def test_separate_results_do_not_pool_sample_identity_or_coordinate_frames():
+def test_separate_results_do_not_pool_coordinate_frames():
     first, second = _sdata(), _sdata()
-    second.attrs["harpy"]["points"]["calls"]["sample_id"] = "sample_b"
     set_transformation(
         second.points["calls"],
         Affine([[1, 0, 100], [0, 1, -30], [0, 0, 1]], input_axes=("x", "y"), output_axes=("x", "y")),
@@ -875,8 +870,6 @@ def test_separate_results_do_not_pool_sample_identity_or_coordinate_frames():
     )
     a = hp.qc.summarize_points(first, "calls", bin_size=2)
     b = hp.qc.summarize_points(second, "calls", bin_size=2, to_coordinate_system="other")
-    assert a.metadata.sample_id == "sample_a"
-    assert b.metadata.sample_id == "sample_b"
     assert a.metadata.to_coordinate_system == "global"
     assert b.metadata.to_coordinate_system == "other"
     assert b.metadata.extent == (100, 108, -30, -28)

@@ -10,9 +10,9 @@ import pandas as pd
 import pytest
 import tifffile
 from spatialdata import SpatialData, read_zarr
-from spatialdata.transformations import get_transformation
+from spatialdata.transformations import Identity, get_transformation
 
-from harpy import __version__
+from harpy import __version__, get_coordinate_system_metadata, get_element_coordinate_system
 from harpy.image._image import get_dataarray
 from harpy.io import CosmxSample, cosmx
 from harpy.io._cosmx import _reader
@@ -66,36 +66,55 @@ def test_cosmx_reads_one_sample_with_sample_scoped_names_and_metadata(
     assert get_dataarray(sdata, "sample_a_instance_labels_mosaic_1").dtype == np.dtype(np.uint32)
     assert sum(len(points.compute()) for points in sdata.points.values()) == 3
 
-    expected = {"sample_a_global_1", "sample_a_global_1_micron"}
-    assert set(get_transformation(sdata.images["sample_a_morphology_image_mosaic_1"], get_all=True)) == expected
-    assert set(get_transformation(sdata.labels["sample_a_instance_labels_mosaic_1"], get_all=True)) == expected
-    assert set(get_transformation(sdata.points["sample_a_transcripts_mosaic_1"], get_all=True)) == expected
+    # Every element of a mosaic lies unscaled in the mosaic's one coordinate system.
+    for element_name in (
+        "sample_a_morphology_image_mosaic_1",
+        "sample_a_instance_labels_mosaic_1",
+        "sample_a_compartment_labels_mosaic_1",
+        "sample_a_transcripts_mosaic_1",
+    ):
+        assert get_transformation(sdata[element_name], get_all=True) == {"sample_a_global_1": Identity()}
 
     metadata = sdata.attrs["harpy"]
     assert metadata["provenance"] == {"reader": "cosmx", "reader_version": __version__}
-    image_metadata = metadata["images"]["sample_a_morphology_image_mosaic_1"]
-    assert image_metadata["sample_id"] == "sample_a"
-    assert image_metadata["fovs"] == [1, 2]
-    assert image_metadata["mosaic"] == {"mode": "spatial_groups", "adjacency_tolerance_px": 1, "number": 1}
-    panel_names = set(metadata["feature_panels"])
-    assert len(panel_names) == 1
-    panel_name = panel_names.pop()
-    assert panel_name.startswith("feature_panel_")
-    assert {record["feature_panel"] for record in metadata["points"].values()} == {panel_name}
+    # One record per mosaic, keyed by its coordinate system, holds the facts of the mosaic once.
+    records = metadata["coordinate_systems"]
+    assert list(records) == ["sample_a_global_1", "sample_a_global_2"]
     expected_bounds = {
         1: {"1": {"y0": 0, "x0": 0, "y1": 8, "x1": 8}, "2": {"y0": 0, "x0": 8, "y1": 8, "x1": 16}},
         2: {"3": {"y0": 0, "x0": 0, "y1": 8, "x1": 8}},
     }
     for mosaic, bounds in expected_bounds.items():
-        records = [
-            record
-            for registry in ("images", "labels", "points")
-            for name, record in metadata[registry].items()
-            if name.endswith(f"_mosaic_{mosaic}")
-        ]
-        assert len(records) == 4
-        assert all(record["fov_bounds_px"] == bounds for record in records)
-        assert all(record["mosaic"]["number"] == mosaic for record in records)
+        record = records[f"sample_a_global_{mosaic}"]
+        assert record["sample_id"] == "sample_a"
+        assert record["mosaic"] == mosaic
+        assert record["fovs"] == [int(fov) for fov in bounds]
+        assert record["fov_bounds"] == bounds
+        assert record["mosaic_grouping"] == {"mode": "spatial_groups", "adjacency_tolerance_px": 1}
+    # Element records hold only their own fields.
+    assert metadata["images"]["sample_a_morphology_image_mosaic_1"].keys() == {"channels"}
+    assert metadata["labels"]["sample_a_instance_labels_mosaic_1"].keys() == {"instance_id_encoding"}
+    assert metadata["labels"]["sample_a_compartment_labels_mosaic_1"].keys() == {"categories"}
+    panel_names = set(metadata["feature_panels"])
+    assert len(panel_names) == 1
+    panel_name = panel_names.pop()
+    assert panel_name.startswith("feature_panel_")
+    assert list(metadata["points"].values()) == [{"feature_panel": panel_name}] * 2
+
+    # Downstream code reads the same facts with the public functions, without names or attrs.
+    table = get_coordinate_system_metadata(sdata)
+    assert table.index.tolist() == ["sample_a_global_1", "sample_a_global_2"]
+    assert table["sample_id"].tolist() == ["sample_a", "sample_a"]
+    assert table["mosaic"].tolist() == [1, 2]
+    assert table["microns_per_unit"].tolist() == [records[name]["microns_per_unit"] for name in table.index]
+    assert table.loc["sample_a_global_2", "fov_bounds"] == expected_bounds[2]
+    assert {
+        name: get_element_coordinate_system(sdata, name) for name in (*sdata.images, *sdata.labels, *sdata.points)
+    } == {
+        f"sample_a_{product}_mosaic_{mosaic}": f"sample_a_global_{mosaic}"
+        for product in ("morphology_image", "instance_labels", "compartment_labels", "transcripts")
+        for mosaic in (1, 2)
+    }
     assert not _generated_siblings(output)
 
 
@@ -138,26 +157,19 @@ def test_cosmx_writes_two_samples_with_independent_configuration(
     assert get_dataarray(sdata, "sample_a_morphology_image_mosaic_1").coords["c"].values.tolist() == ["DNA"]
     assert get_dataarray(sdata, "sample_b_morphology_image_mosaic_1").coords["c"].values.tolist() == ["Histone"]
     assert set(get_transformation(sdata.images["sample_a_morphology_image_mosaic_1"], get_all=True)) == {
-        "sample_a_pixels_1",
-        "sample_a_pixels_1_micron",
+        "sample_a_pixels_1"
     }
     assert set(get_transformation(sdata.images["sample_b_morphology_image_mosaic_1"], get_all=True)) == {
-        "sample_b_global_1",
-        "sample_b_global_1_micron",
+        "sample_b_global_1"
     }
-    metadata = sdata.attrs["harpy"]["images"]
-    assert metadata["sample_a_morphology_image_mosaic_1"]["orientation"] == {"flip_x": False, "flip_y": False}
-    assert metadata["sample_a_morphology_image_mosaic_1"]["mosaic"] == {
-        "mode": "spatial_groups",
-        "adjacency_tolerance_px": 0,
-        "number": 1,
-    }
-    assert metadata["sample_b_morphology_image_mosaic_1"]["orientation"] == {"flip_x": True, "flip_y": True}
-    assert metadata["sample_b_morphology_image_mosaic_1"]["mosaic"] == {
-        "mode": "single",
-        "adjacency_tolerance_px": None,
-        "number": 1,
-    }
+    metadata = sdata.attrs["harpy"]["coordinate_systems"]
+    assert set(metadata) == {"sample_a_pixels_1", "sample_b_global_1"}
+    assert metadata["sample_a_pixels_1"]["sample_id"] == "sample_a"
+    assert metadata["sample_a_pixels_1"]["orientation"] == {"flip_x": False, "flip_y": False}
+    assert metadata["sample_a_pixels_1"]["mosaic_grouping"] == {"mode": "spatial_groups", "adjacency_tolerance_px": 0}
+    assert metadata["sample_b_global_1"]["sample_id"] == "sample_b"
+    assert metadata["sample_b_global_1"]["orientation"] == {"flip_x": True, "flip_y": True}
+    assert metadata["sample_b_global_1"]["mosaic_grouping"] == {"mode": "single", "adjacency_tolerance_px": None}
 
 
 def test_cosmx_deduplicates_identical_feature_panels_across_samples(
@@ -243,7 +255,9 @@ def test_cosmx_intersects_fovs_only_across_enabled_modalities(
         points=False,
         image_chunks=(1, 4, 4),
     )
-    represented = {fov for record in morphology_only.attrs["harpy"]["images"].values() for fov in record["fovs"]}
+    represented = {
+        fov for record in morphology_only.attrs["harpy"]["coordinate_systems"].values() for fov in record["fovs"]
+    }
     assert represented == {1, 2, 3}
 
     with_instance_labels = cosmx(
@@ -254,7 +268,9 @@ def test_cosmx_intersects_fovs_only_across_enabled_modalities(
         image_chunks=(1, 4, 4),
         labels_chunks=(4, 4),
     )
-    represented = {fov for record in with_instance_labels.attrs["harpy"]["images"].values() for fov in record["fovs"]}
+    represented = {
+        fov for record in with_instance_labels.attrs["harpy"]["coordinate_systems"].values() for fov in record["fovs"]
+    }
     assert represented == {1, 3}
 
 

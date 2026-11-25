@@ -31,7 +31,6 @@ def _grid_and_metadata(*, microns_per_unit=None):
         microns_per_unit=microns_per_unit,
         points_name="calls",
         feature_panel="panel_a",
-        sample_id="sample_a",
     )
     return grid, metadata
 

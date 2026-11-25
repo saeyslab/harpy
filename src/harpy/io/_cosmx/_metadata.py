@@ -6,17 +6,18 @@ from copy import deepcopy
 from loguru import logger as log
 from spatialdata import SpatialData
 
-from harpy._metadata import (
+from harpy.io._cosmx._constants import _FOV_BOUNDS_KEY, _MICRONS_PER_UNIT_KEY, _MOSAIC_KEY, _SAMPLE_ID_KEY
+from harpy.io._cosmx._models import _CosmxMosaicGeometry, _CosmxPreview
+from harpy.metadata._registry import (
+    _COORDINATE_SYSTEMS_METADATA_KEY,
     _FEATURE_PANELS_METADATA_KEY,
     _PROVENANCE_METADATA_KEY,
     _harpy_metadata,
     _metadata_registry,
 )
-from harpy.io._cosmx._constants import _FOV_BOUNDS_KEY, _SAMPLE_ID_KEY
-from harpy.io._cosmx._models import _CosmxMosaicGeometry, _CosmxPreview
 
 
-def _common_element_record(
+def _coordinate_system_record(
     preview: _CosmxPreview,
     mosaic: _CosmxMosaicGeometry,
     *,
@@ -24,19 +25,27 @@ def _common_element_record(
     flip_x: bool,
     flip_y: bool,
 ) -> dict[str, object]:
-    """Return the record fields shared by the image, labels and points elements of one mosaic."""
+    """Return the record of one mosaic's coordinate system: the facts of the mosaic and of its run.
+
+    :func:`harpy.io.cosmx` writes the image, labels and points elements of a
+    mosaic unscaled in the mosaic's pixel coordinate system, so the record
+    describes all of them; ``microns_per_unit`` is the pixel size. The facts of the run
+    (``microns_per_unit``, ``orientation``, ``mosaic_grouping`` and
+    ``acquisition_timestamp``) are the same in each coordinate system of a
+    sample.
+    """
     record: dict[str, object] = {
-        "fovs": list(mosaic.fovs),
         _SAMPLE_ID_KEY: sample_id,
-        "mosaic": {
+        _MOSAIC_KEY: mosaic.mosaic,
+        _MICRONS_PER_UNIT_KEY: preview.manifest.run.pixel_size_um,
+        "fovs": list(mosaic.fovs),
+        _FOV_BOUNDS_KEY: mosaic.fov_bounds_px,
+        "source_origin_px": {"x": mosaic.origin_x_px, "y": mosaic.origin_y_px},
+        "orientation": {"flip_x": flip_x, "flip_y": flip_y},
+        "mosaic_grouping": {
             "mode": preview.mosaic_mode,
             "adjacency_tolerance_px": preview.adjacency_tolerance_px,
-            "number": mosaic.mosaic,
         },
-        "source_origin_px": {"x": mosaic.origin_x_px, "y": mosaic.origin_y_px},
-        _FOV_BOUNDS_KEY: mosaic.fov_bounds_px,
-        "orientation": {"flip_x": flip_x, "flip_y": flip_y},
-        "pixel_size_um": preview.manifest.run.pixel_size_um,
     }
     if preview.manifest.run.acquisition_timestamp is not None:
         record["acquisition_timestamp"] = preview.manifest.run.acquisition_timestamp
@@ -46,18 +55,26 @@ def _common_element_record(
 def _commit_element_metadata(
     sdata: SpatialData,
     *,
+    coordinate_system: tuple[str, Mapping[str, object]],
     registry: str,
     element_name: str,
-    record: Mapping[str, object],
+    record: Mapping[str, object] | None,
     reader_version: str | None,
     feature_panel: tuple[str, Mapping[str, object]] | None = None,
 ) -> None:
-    """Persist one element record after its payload has been written successfully.
+    """Persist the metadata of one element after its payload has been written successfully.
 
-    The element record, optional shared feature panel, and reader version are
+    The record of the element's coordinate system, the element record (if
+    any), the optional shared feature panel, and the reader version are
     committed in one root-attributes write. If that write fails, restore the
     preceding attributes and make a best-effort attempt to delete only the newly
     written element before re-raising the original error.
+
+    The coordinate-system record is inserted if absent. The elements of one
+    mosaic share it, so a present record must equal the new one; a different
+    one raises, as the element would claim a coordinate system that another
+    mosaic describes. Without fields of its own, such as points without a
+    feature panel, an element has no record (``record=None``).
 
     Callers validate existing panels and check for key collisions beforehand.
     Insert a panel only if absent; otherwise retain the validated shared record,
@@ -66,7 +83,17 @@ def _commit_element_metadata(
     previous_attrs = deepcopy(sdata.attrs)
     try:
         attrs = deepcopy(previous_attrs)
-        _metadata_registry(attrs, registry)[element_name] = dict(record)
+        coordinate_system_name, coordinate_system_record = coordinate_system
+        coordinate_system_records = _metadata_registry(attrs, _COORDINATE_SYSTEMS_METADATA_KEY)
+        existing = coordinate_system_records.setdefault(coordinate_system_name, dict(coordinate_system_record))
+        if existing != coordinate_system_record:
+            raise ValueError(
+                f"CosMx coordinate system {coordinate_system_name!r} of element {element_name!r} already has a "
+                f"different record in sdata.attrs['harpy']['{_COORDINATE_SYSTEMS_METADATA_KEY}']: {existing!r}. "
+                "Each mosaic needs a coordinate system of its own; choose another coordinate_system base name."
+            )
+        if record is not None:
+            _metadata_registry(attrs, registry)[element_name] = dict(record)
         if feature_panel is not None:
             panel_name, panel_record = feature_panel
             _metadata_registry(attrs, _FEATURE_PANELS_METADATA_KEY).setdefault(panel_name, dict(panel_record))

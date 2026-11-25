@@ -39,7 +39,6 @@ def summary():
     """
     metadata = PointsSummaryMetadata(
         points_name="calls",
-        sample_id="sample_a",
         feature_panel="panel_a",
         to_coordinate_system="sample_pixels",
         crd=None,

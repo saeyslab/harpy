@@ -17,7 +17,6 @@ from harpy._feature_panels import (
     _parse_feature_panel_registry,
     _validate_feature_panel_collision,
 )
-from harpy._metadata import _FEATURE_PANELS_METADATA_KEY, _HARPY_METADATA_KEY, _PROVENANCE_METADATA_KEY
 from harpy.io._cosmx._discovery import _discover_cosmx
 from harpy.io._cosmx._images import _add_morphology_images, _select_channels
 from harpy.io._cosmx._labels import _add_compartment_labels, _add_instance_labels
@@ -30,15 +29,11 @@ from harpy.io._cosmx._models import (
     _CosmxPreview,
     _validate_identifier,
 )
-from harpy.io._cosmx._names import (
-    _element_name,
-    _micron_coordinate_system,
-    _pixel_coordinate_system,
-    _sample_name,
-)
+from harpy.io._cosmx._names import _element_name, _pixel_coordinate_system, _sample_name
 from harpy.io._cosmx._preview import _preview_cosmx
 from harpy.io._cosmx._transcripts import _add_transcript_points
 from harpy.io._cosmx._validation import _validate_cosmx_sdata
+from harpy.metadata._registry import _FEATURE_PANELS_METADATA_KEY, _HARPY_METADATA_KEY, _PROVENANCE_METADATA_KEY
 
 
 @dataclass(frozen=True)
@@ -71,21 +66,23 @@ def cosmx(
     Each mapping entry is discovered and planned before any payload is decoded.
     For a sample, positioned FOV availability is intersected only across the
     enabled modalities. Those modalities then share the sample's FOV selection,
-    mosaics, orientation, and independent pixel and micron coordinate systems.
-    Every generated element and coordinate system is prefixed by its sample ID,
+    mosaics, orientation, and independent pixel coordinate systems. Every
+    generated element and coordinate system is prefixed by its sample ID,
     including for a one-entry mapping.
 
     The FOVs of a sample are grouped into mosaics: a mosaic is a group of
     adjacent FOVs, stitched into one canvas. For each mosaic, the reader
     writes one element per enabled product, named
-    ``<sample>_<base>_mosaic_<n>``, in the mosaic's own pixel and micron
-    coordinate systems, ``<sample>_<coordinate_system>_<n>`` and
-    ``<sample>_<coordinate_system>_<n>_micron``. Harpy assigns the mosaic
-    numbers, not CosMx: they count from 1, in order of decreasing FOV count.
-    Each element also records its number ``<n>`` in the ``mosaic.number``
-    field of its metadata, so elements can be paired and named per mosaic
-    without parsing names. ``mosaic_mode`` of :class:`CosmxSample` sets how
-    FOVs are grouped.
+    ``<sample>_<base>_mosaic_<n>``, unscaled in the mosaic's own pixel
+    coordinate system, ``<sample>_<coordinate_system>_<n>``. Harpy assigns the
+    mosaic numbers, not CosMx: they count from 1, in order of decreasing FOV
+    count. The facts of each mosaic, such as its sample, number ``<n>`` and
+    pixel size, are recorded once, under the name of its coordinate system,
+    so an element's mosaic follows from the coordinate system it lies in,
+    without parsing names. Elements derived from the reader's elements, such
+    as a segmentation of a morphology image, keep their source's coordinate
+    systems and so the same lookup. ``mosaic_mode`` of :class:`CosmxSample`
+    sets how FOVs are grouped.
 
     The complete output is transactional. Data are written directly into a
     temporary sibling Zarr store and published only after that store can be
@@ -148,24 +145,27 @@ def cosmx(
         │   ├── reader: "cosmx"
         │   └── reader_version: <Harpy version>
         │
-        ├── images
-        │   └── <image element name>
+        ├── coordinate_systems
+        │   └── <pixel coordinate system of a mosaic>
         │       ├── sample_id: <sample identifier>
+        │       ├── mosaic: <int>
+        │       ├── microns_per_unit: <float>
         │       ├── fovs: [<source FOVs>]
-        │       ├── mosaic
-        │       │   ├── mode: "spatial_groups" | "single"
-        │       │   ├── adjacency_tolerance_px: <int> | None
-        │       │   └── number: <int>
+        │       ├── fov_bounds
+        │       │   └── "<fov>": {y0: <int>, x0: <int>, y1: <int>, x1: <int>}
         │       ├── source_origin_px
         │       │   ├── x: <int>
         │       │   └── y: <int>
-        │       ├── fov_bounds_px
-        │       │   └── "<fov>": {y0: <int>, x0: <int>, y1: <int>, x1: <int>}
         │       ├── orientation
         │       │   ├── flip_x: <bool>
         │       │   └── flip_y: <bool>
-        │       ├── pixel_size_um: <float>
-        │       ├── acquisition_timestamp: <source OrigTimeStamp>  [optional]
+        │       ├── mosaic_grouping
+        │       │   ├── mode: "spatial_groups" | "single"
+        │       │   └── adjacency_tolerance_px: <int> | None
+        │       └── acquisition_timestamp: <source OrigTimeStamp>  [optional]
+        │
+        ├── images
+        │   └── <image element name>
         │       └── channels
         │           └── [<channel record>, ...]
         │               ├── channel_id: <str>
@@ -175,8 +175,6 @@ def cosmx(
         │
         ├── labels
         │   ├── <instance-label element name>
-        │   │   ├── sample_id, fovs, mosaic, source_origin_px, fov_bounds_px,
-        │   │   │   orientation, pixel_size_um, acquisition_timestamp [optional]
         │   │   └── instance_id_encoding
         │   │       ├── background: 0
         │   │       ├── base: <number of source-dtype values>
@@ -184,19 +182,15 @@ def cosmx(
         │   │           "global_id = (fov - 1) * base + local_id"
         │   │
         │   └── <compartment-label element name>
-        │       ├── sample_id, fovs, mosaic, source_origin_px, fov_bounds_px,
-        │       │   orientation, pixel_size_um, acquisition_timestamp [optional]
         │       └── categories
         │           ├── 0: "background"
         │           ├── 1: "nuclear"
         │           ├── 2: "membrane"
         │           └── 3: "cytoplasmic"
         │
-        ├── points
+        ├── points                                              [optional]
         │   └── <transcript points element name>
-        │       ├── sample_id, fovs, mosaic, source_origin_px, fov_bounds_px,
-        │       │   orientation, pixel_size_um, acquisition_timestamp [optional]
-        │       └── feature_panel: "feature_panel_<content hash>"  [optional]
+        │       └── feature_panel: "feature_panel_<content hash>"
         │
         └── feature_panels                                      [optional]
             └── feature_panel_<content hash>
@@ -206,24 +200,31 @@ def cosmx(
                 └── features_by_class
                     └── <feature class>: [<authoritative targets>]
 
-    ``provenance`` records only the reader and Harpy version. The ``images``,
+    ``provenance`` records only the reader and Harpy version.
+    ``coordinate_systems`` holds one record per mosaic, keyed by the name of
+    the mosaic's pixel coordinate system, ``<sample>_<coordinate_system>_<n>``:
+    each fact of a mosaic and of its run is recorded once, there. Every
+    element of the mosaic has an ``Identity`` transformation to that
+    coordinate system, so the record describes all of them. The ``images``,
     ``labels``, and ``points`` mappings are keyed by exact SpatialData element
-    names. Disabled modality registries are omitted. SpatialData coordinate
-    systems and transformations are stored with the spatial elements and are
-    not part of this root Harpy metadata tree. ``acquisition_timestamp`` is the
-    source ``OrigTimeStamp`` preserved verbatim when it is non-empty and
-    consistent across all morphology TIFFs for the sample; otherwise the field
-    is omitted.
+    names and hold only each element's own fields. Disabled modality
+    registries are omitted, and a points element without a feature panel has
+    no record.
 
-    ``mosaic.mode`` and ``mosaic.adjacency_tolerance_px`` are the sample's
-    grouping settings, the same for all its mosaics. ``mosaic.number`` is the
-    mosaic's ``<n>`` from the element names; the image, labels and points
-    elements of one mosaic share it.
-
-    ``fov_bounds_px`` gives each FOV's tile as half-open pixel bounds
-    ``[y0, y1) × [x0, x1)`` in the element's intrinsic frame at full
-    resolution, keyed by FOV number as a string; see
-    :func:`harpy.io.assign_cosmx_fovs`.
+    In a coordinate-system record, ``mosaic`` is the mosaic's ``<n>`` from the
+    element names, and ``microns_per_unit`` the pixel size, the micrometers
+    per unit of the coordinate system. ``fov_bounds`` gives each FOV's tile as
+    half-open bounds ``[y0, y1) × [x0, x1)`` in units of the coordinate
+    system, the intrinsic frame of the mosaic's elements at full resolution,
+    keyed by FOV number as a string; see :func:`harpy.io.assign_cosmx_fovs`.
+    ``source_origin_px``, the upper-left corner of the mosaic in the source
+    pixel frame, and ``mosaic_grouping``, the sample's grouping settings, are
+    in pixels of the CosMx source. ``microns_per_unit``, ``orientation``,
+    ``mosaic_grouping`` and ``acquisition_timestamp`` are the same in each
+    coordinate system of a sample. ``acquisition_timestamp`` is the source
+    ``OrigTimeStamp`` preserved verbatim when it is non-empty and consistent
+    across all morphology TIFFs for the sample; otherwise the field is
+    omitted.
 
     When an authoritative run-level plex is available, ``feature_panel`` is a
     points-record reference whose value is the key of a content-addressed
@@ -281,12 +282,25 @@ def cosmx(
     or expression aggregates. Instances meeting at FOV boundaries are not
     merged.
 
+    **Reading the metadata**
+
+    :func:`harpy.get_coordinate_system_metadata` returns the coordinate-system
+    records as a table, one row per mosaic.
+    :func:`harpy.get_element_coordinate_system` finds the mosaic's coordinate
+    system of any element, also of a segmentation made afterwards::
+
+        # Labels segmented on a crop of the morphology image of mosaic 1 of sample s1.
+        coordinate_system = hp.get_element_coordinate_system(sdata, "cellpose_labels")  # "s1_global_1"
+        hp.get_coordinate_system_metadata(sdata).loc[coordinate_system, ["sample_id", "mosaic"]]
+        # sample_id    s1
+        # mosaic        1
+
     **Assigning cells to FOVs**
 
-    :func:`harpy.io.assign_cosmx_fovs` adds the sample and FOV of each row of
-    a table to its ``.obs``, from the ``fov_bounds_px`` of the mosaic's
-    morphology image, for any segmentation mask of the mosaic, such as a custom
-    segmentation.
+    :func:`harpy.io.assign_cosmx_fovs` adds the sample ID, mosaic number and FOV
+    number of each row of a table to its ``.obs``, from the record of the
+    mosaic's coordinate system, for any segmentation mask of the mosaic, such as
+    a custom segmentation.
     """
     enabled_product_output_names = _validate_enabled_product_output_names(
         images=images,
@@ -675,10 +689,11 @@ def _validate_planned_names(
     separately, rejecting both exact and case-insensitive collisions.
 
     Within one sample mosaic, all enabled modalities intentionally receive the
-    same pixel and micron coordinate systems. Those names are registered once
-    per mosaic below. Names belonging to different sample mosaics, however,
-    must remain distinct; otherwise SpatialData would accept them as one shared
-    coordinate system and incorrectly imply cross-sample alignment.
+    same pixel coordinate system, which also keys the mosaic's record in
+    ``sdata.attrs["harpy"]["coordinate_systems"]``. That name is registered
+    once per mosaic below. Names belonging to different sample mosaics,
+    however, must remain distinct; otherwise SpatialData would accept them as
+    one shared coordinate system and incorrectly imply cross-sample alignment.
 
     Sample prefixes alone do not guarantee uniqueness because identifiers are
     joined with underscores. For example, sample/base pairs ``("a_b", "c")``
@@ -714,12 +729,6 @@ def _validate_planned_names(
                 coordinate_owners,
                 pixel_coordinate_system,
                 owner=(sample.sample_id, "pixel coordinate system"),
-                kind="coordinate system",
-            )
-            _register_planned_name(
-                coordinate_owners,
-                _micron_coordinate_system(pixel_coordinate_system),
-                owner=(sample.sample_id, "micron coordinate system"),
                 kind="coordinate system",
             )
 

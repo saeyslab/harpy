@@ -78,7 +78,7 @@ def _reduce_points_by_class(
     """
     if points_name not in sdata.points:
         raise ValueError(f"Points element {points_name!r} does not exist.")
-    panel_name, panel, points_record = _resolve_points_feature_panel(sdata, points_name)
+    panel_name, panel = _resolve_points_feature_panel(sdata, points_name)
     points = sdata.points[points_name]
     _validate_point_columns(points, points_name=points_name, panel=panel)
     if feature_classes is None:
@@ -170,7 +170,6 @@ def _reduce_points_by_class(
         )
     metadata = PointsSummaryMetadata(
         points_name=points_name,
-        sample_id=points_record.get("sample_id"),
         feature_panel=panel_name,
         to_coordinate_system=to_coordinate_system,
         crd=crd,

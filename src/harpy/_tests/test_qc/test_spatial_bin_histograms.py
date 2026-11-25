@@ -37,7 +37,6 @@ def _summary(counts):
     edges = tuple(float(value) for value in np.arange(len(counts) + 2) * 10)
     metadata = PointsSummaryMetadata(
         points_name="calls",
-        sample_id="sample",
         feature_panel="panel",
         to_coordinate_system="sample_micron",
         crd=None,

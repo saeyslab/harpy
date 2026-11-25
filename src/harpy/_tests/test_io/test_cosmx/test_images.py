@@ -8,7 +8,7 @@ import pytest
 import tifffile
 from spatialdata import SpatialData, read_zarr
 from spatialdata.models import Labels2DModel
-from spatialdata.transformations import Identity, Scale, get_transformation
+from spatialdata.transformations import Identity, get_transformation
 from xarray import DataArray
 
 from harpy.image._image import get_dataarray
@@ -59,24 +59,28 @@ def test_add_morphology_images_stitches_groups_and_roundtrips(
         get_dataarray(roundtripped, "morphology_image_mosaic_1").data.compute(),
         values,
     )
-    assert roundtripped.attrs["harpy"]["images"]["morphology_image_mosaic_2"]["mosaic"]["number"] == 2
-    metadata = roundtripped.attrs["harpy"]["images"]["morphology_image_mosaic_1"]
-    assert metadata == {
-        "fovs": [1, 2],
+    coordinate_systems = roundtripped.attrs["harpy"]["coordinate_systems"]
+    assert list(coordinate_systems) == ["global_1", "global_2"]
+    assert coordinate_systems["global_2"]["mosaic"] == 2
+    assert coordinate_systems["global_1"] == {
         "sample_id": "sample",
-        "mosaic": {
-            "mode": preview.mosaic_mode,
-            "adjacency_tolerance_px": preview.adjacency_tolerance_px,
-            "number": 1,
-        },
-        "source_origin_px": {"x": 0, "y": 0},
-        "fov_bounds_px": {
+        "mosaic": 1,
+        "microns_per_unit": 1.0,
+        "fovs": [1, 2],
+        "fov_bounds": {
             "1": {"y0": 0, "x0": 0, "y1": 8, "x1": 8},
             "2": {"y0": 0, "x0": 9, "y1": 8, "x1": 17},
         },
+        "source_origin_px": {"x": 0, "y": 0},
         "orientation": {"flip_x": True, "flip_y": False},
-        "pixel_size_um": 1.0,
+        "mosaic_grouping": {
+            "mode": preview.mosaic_mode,
+            "adjacency_tolerance_px": preview.adjacency_tolerance_px,
+        },
         "acquisition_timestamp": "20240101_100000_S2",
+    }
+    metadata = roundtripped.attrs["harpy"]["images"]["morphology_image_mosaic_1"]
+    assert metadata == {
         "channels": [
             {
                 "channel_id": "B",
@@ -186,7 +190,7 @@ def test_add_morphology_images_forwards_explicit_orientation(
 
     values = get_dataarray(sdata, "morphology_image_mosaic_1").data.compute()
     np.testing.assert_array_equal(values[:, :, :8], _tile(1, planes=(0,))[:, ::-1, :])
-    metadata = sdata.attrs["harpy"]["images"]["morphology_image_mosaic_1"]
+    metadata = sdata.attrs["harpy"]["coordinate_systems"]["global_1"]
     assert metadata["orientation"] == {"flip_x": False, "flip_y": True}
 
 
@@ -327,9 +331,5 @@ def _instrument_plane_reads(monkeypatch: pytest.MonkeyPatch) -> list[tuple[Path,
 
 
 def _assert_transformations(sdata: SpatialData, image_name: str, *, mosaic: int) -> None:
-    transformations = get_transformation(sdata.images[image_name], get_all=True)
-    assert set(transformations) == {f"global_{mosaic}", f"global_{mosaic}_micron"}
-    assert transformations[f"global_{mosaic}"] == Identity()
-    expected = Scale([1.0, 1.0], axes=("x", "y")).to_affine_matrix(input_axes=("x", "y"), output_axes=("x", "y"))
-    actual = transformations[f"global_{mosaic}_micron"].to_affine_matrix(input_axes=("x", "y"), output_axes=("x", "y"))
-    np.testing.assert_array_equal(actual, expected)
+    # Only the mosaic's pixel coordinate system; no micron coordinate system.
+    assert get_transformation(sdata.images[image_name], get_all=True) == {f"global_{mosaic}": Identity()}

@@ -10,7 +10,7 @@ import pandas as pd
 from dask.dataframe import DataFrame as DaskDataFrame
 from spatialdata import SpatialData
 
-from harpy._metadata import (
+from harpy.metadata._registry import (
     _FEATURE_PANELS_METADATA_KEY,
     _HARPY_METADATA_KEY,
     _METADATA_VERSION,
@@ -132,10 +132,8 @@ class _FeaturePanelContract:
         }
 
 
-def _resolve_points_feature_panel(
-    sdata: SpatialData, points_name: str
-) -> tuple[str, _FeaturePanelContract, Mapping[str, object]]:
-    """Resolve a points element's authoritative panel and source metadata, without writes."""
+def _resolve_points_feature_panel(sdata: SpatialData, points_name: str) -> tuple[str, _FeaturePanelContract]:
+    """Resolve a points element's authoritative panel and its key, without writes."""
     missing_panel = (
         f"Points element {points_name!r} has no feature-panel mapping. Register its complete assay panel with "
         "hp.pt.add_feature_panel(sdata, points_name=..., feature_key=..., feature_class_key=..., "
@@ -156,7 +154,7 @@ def _resolve_points_feature_panel(
     if panel_name not in panels:
         raise ValueError(missing_panel)
     panel_record = _require_mapping(panels.get(panel_name), path=f"harpy.feature_panels.{panel_name}")
-    return panel_name, _parse_feature_panel(panel_record, panel_name=panel_name), record
+    return panel_name, _parse_feature_panel(panel_record, panel_name=panel_name)
 
 
 def _make_feature_panel(

@@ -85,14 +85,14 @@ from harpy._feature_panels import (
     _require_nonempty_string,
     _validate_feature_class_dtype,
 )
-from harpy._metadata import (
+from harpy.image._image import _get_spatial_element
+from harpy.metadata._registry import (
     _FEATURE_PANELS_METADATA_KEY,
     _HARPY_METADATA_KEY,
     _METADATA_VERSION,
     _METADATA_VERSION_KEY,
     _POINTS_METADATA_KEY,
 )
-from harpy.image._image import _get_spatial_element
 from harpy.table._aggregation_checkpoint import (
     _AggregationCheckpoint,
     _CheckpointPair,
