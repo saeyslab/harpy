@@ -12,7 +12,7 @@ import tifffile
 from spatialdata import SpatialData, read_zarr
 from spatialdata.transformations import Identity, get_transformation
 
-from harpy import __version__
+from harpy import __version__, get_coordinate_system_metadata, get_element_coordinate_system
 from harpy.image._image import get_dataarray
 from harpy.io import CosmxSample, cosmx
 from harpy.io._cosmx import _reader
@@ -100,6 +100,21 @@ def test_cosmx_reads_one_sample_with_sample_scoped_names_and_metadata(
     panel_name = panel_names.pop()
     assert panel_name.startswith("feature_panel_")
     assert list(metadata["points"].values()) == [{"feature_panel": panel_name}] * 2
+
+    # Downstream code reads the same facts with the public functions, without names or attrs.
+    table = get_coordinate_system_metadata(sdata)
+    assert table.index.tolist() == ["sample_a_global_1", "sample_a_global_2"]
+    assert table["sample_id"].tolist() == ["sample_a", "sample_a"]
+    assert table["mosaic"].tolist() == [1, 2]
+    assert table["microns_per_unit"].tolist() == [records[name]["microns_per_unit"] for name in table.index]
+    assert table.loc["sample_a_global_2", "fov_bounds"] == expected_bounds[2]
+    assert {
+        name: get_element_coordinate_system(sdata, name) for name in (*sdata.images, *sdata.labels, *sdata.points)
+    } == {
+        f"sample_a_{product}_mosaic_{mosaic}": f"sample_a_global_{mosaic}"
+        for product in ("morphology_image", "instance_labels", "compartment_labels", "transcripts")
+        for mosaic in (1, 2)
+    }
     assert not _generated_siblings(output)
 
 

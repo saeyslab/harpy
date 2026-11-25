@@ -6,11 +6,12 @@ from pathlib import Path
 from typing import Any
 
 import dask.dataframe as dd
+import numpy as np
 import pandas as pd
 import pytest
 from dask.dataframe import DataFrame as DaskDataFrame
 from spatialdata import SpatialData, read_zarr
-from spatialdata.models import PointsModel
+from spatialdata.models import Labels2DModel, PointsModel
 from spatialdata.transformations import Identity, Scale, set_transformation
 
 from harpy import __version__
@@ -211,9 +212,10 @@ def test_validate_cosmx_store_rejects_disagreeing_coordinate_system_records(
             "'sample_global_1', with an Identity transformation",
         ),
         (
+            # Caught by the rules of hp.validate_coordinate_system_metadata, before the reader's own.
             {"sample_global_1": Identity(), "sample_global_2": Identity()},
-            "CosMx element 'sample_morphology_image_mosaic_1' must have a transformation to exactly one coordinate "
-            "system in harpy.coordinate_systems, found ['sample_global_1', 'sample_global_2']",
+            "several coordinate systems with Harpy metadata: 'sample_morphology_image_mosaic_1' to "
+            "['sample_global_1', 'sample_global_2']",
         ),
         (
             {"aligned": Identity()},
@@ -232,6 +234,25 @@ def test_validate_cosmx_store_rejects_misplaced_reader_rasters(
     sdata.write_transformations("sample_morphology_image_mosaic_1")
 
     with pytest.raises(ValueError, match=re.escape(message)):
+        validate_cosmx_store(reader_store)
+
+
+def test_validate_cosmx_store_rejects_a_derived_element_in_two_mosaics(reader_store: Path) -> None:
+    sdata = read_zarr(reader_store)
+    # Labels without a record, such as a segmentation, placed in the coordinate systems of both mosaics.
+    sdata.labels["derived_labels"] = Labels2DModel.parse(
+        np.zeros((8, 16), dtype=np.uint32),
+        dims=("y", "x"),
+        transformations={"sample_global_1": Identity(), "sample_global_2": Identity()},
+    )
+    sdata.write_element("derived_labels")
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape(
+            "several coordinate systems with Harpy metadata: 'derived_labels' to ['sample_global_1', 'sample_global_2']"
+        ),
+    ):
         validate_cosmx_store(reader_store)
 
 
