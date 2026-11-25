@@ -13,8 +13,9 @@ sdata.attrs["harpy"]
 ├── metadata_version
 ├── provenance                         reader identity and Harpy version
 ├── coordinate_systems
-│   └── <coordinate system name>        one per mosaic: sample_id, mosaic,
-│                                      microns_per_unit, and reader fields
+│   └── <coordinate system name>        facts of the elements written in it,
+│                                      such as microns_per_unit; fields per
+│                                      writer (hp.io.cosmx: one per mosaic)
 ├── images
 │   └── <image name>                    channels
 ├── labels
@@ -46,9 +47,22 @@ An element belongs to the record of the one coordinate system with a record to
 which it has a transformation. Harpy's functions copy an element's
 transformations to the elements they derive from it, so a segmentation of a
 morphology image, also of a crop, finds the same record; no element records
-its mosaic. `microns_per_unit` gives the micrometers per unit of the coordinate
-system. The reader adds fields of its own, documented in its docstring, such
-as the FOVs of a CosMx mosaic and their bounds.
+its mosaic. The fields of a record depend on its writer, which documents them:
+{func}`hp.io.cosmx <harpy.io.cosmx>` writes, per mosaic, its `sample_id`,
+`mosaic` number, `microns_per_unit` (the micrometers per unit of the
+coordinate system), FOVs and their bounds.
+
+Code outside Harpy reads these records with
+{func}`hp.get_coordinate_system_metadata <harpy.get_coordinate_system_metadata>`,
+one row per coordinate system, and finds the coordinate system of an element
+with {func}`hp.get_element_coordinate_system <harpy.get_element_coordinate_system>`,
+rather than reading `sdata.attrs["harpy"]` itself.
+
+{func}`hp.validate_coordinate_system_metadata <harpy.validate_coordinate_system_metadata>`
+checks the rules that hold whoever writes these records: each record names a
+coordinate system of `sdata`, and no element has transformations to two
+coordinate systems with a record. A writer's own validator checks the fields
+it writes, after these rules, as `hp.io.validate_cosmx_store` does.
 
 The panel is authoritative for feature-to-class assignments and may include
 features with no detected points. The class column in the points dataframe is
