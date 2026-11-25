@@ -21,6 +21,23 @@ Import Harpy as::
     SpatialBounds
 ```
 
+## Metadata
+
+Read the metadata that readers record for the coordinate systems they write, find the coordinate
+system with Harpy metadata of an element, and validate that metadata against its rules.
+
+```{eval-rst}
+
+.. currentmodule:: harpy
+
+.. autosummary::
+    :toctree: generated
+
+    get_coordinate_system_metadata
+    get_element_coordinate_system
+    validate_coordinate_system_metadata
+```
+
 ## I/O
 
 ```{eval-rst}

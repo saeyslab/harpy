@@ -50,9 +50,13 @@ def get_coordinate_system_metadata(sdata: SpatialData) -> pd.DataFrame:
 
     .. code-block:: python
 
+        # Labels segmented on a crop of the morphology image of mosaic 1 of sample s1.
         metadata = hp.get_coordinate_system_metadata(sdata)
-        coordinate_system = hp.get_element_coordinate_system(sdata, "s1_cellpose_labels_mosaic_1")
+        coordinate_system = hp.get_element_coordinate_system(sdata, "cellpose_labels")  # "s1_global_1"
         metadata.loc[coordinate_system, ["sample_id", "mosaic", "microns_per_unit"]]
+        # sample_id               s1
+        # mosaic                   1
+        # microns_per_unit    0.1203
     """
     records = _coordinate_system_records(sdata)
     rows = [deepcopy(dict(record)) for record in records.values()]
@@ -76,7 +80,7 @@ def get_element_coordinate_system(sdata: SpatialData, element_name: str) -> str 
     metadata of its own::
 
         image   s1_morphology_image_mosaic_1   {"s1_global_1": Identity()}
-        labels  s1_cellpose_labels_mosaic_1    {"s1_global_1": Translation(...)}
+        labels  cellpose_labels                {"s1_global_1": Translation(...)}
             -> "s1_global_1", for both
 
     Parameters
@@ -110,9 +114,12 @@ def get_element_coordinate_system(sdata: SpatialData, element_name: str) -> str 
 
     .. code-block:: python
 
-        coordinate_system = hp.get_element_coordinate_system(sdata, "s1_cellpose_labels_mosaic_1")
-        mosaic = hp.get_coordinate_system_metadata(sdata).loc[coordinate_system, "mosaic"]
-        images = [name for name in sdata.images if hp.get_element_coordinate_system(sdata, name) == coordinate_system]
+        # Labels segmented on a crop of the morphology image of mosaic 1 of sample s1.
+        coordinate_system = hp.get_element_coordinate_system(sdata, "cellpose_labels")  # "s1_global_1"
+        hp.get_coordinate_system_metadata(sdata).loc[coordinate_system, "mosaic"]  # 1
+        # The images of that mosaic: its morphology image, and any copy derived from it.
+        [name for name in sdata.images if hp.get_element_coordinate_system(sdata, name) == coordinate_system]
+        # ["s1_morphology_image_mosaic_1", "s1_morphology_image_mosaic_1_normalized"]
     """
     if element_name in sdata.tables:
         raise ValueError(

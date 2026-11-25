@@ -8,9 +8,9 @@ from spatialdata import SpatialData
 from spatialdata.models import TableModel, get_table_keys
 from spatialdata.transformations import get_transformation
 
-from harpy.io._cosmx._constants import _FOV_BOUNDS_KEY
-from harpy.metadata._coordinate_systems import _coordinate_system_records, _element_coordinate_system
-from harpy.metadata._registry import _COORDINATE_SYSTEMS_METADATA_KEY, _HARPY_METADATA_KEY, _MOSAIC_KEY, _SAMPLE_ID_KEY
+from harpy.io._cosmx._constants import _FOV_BOUNDS_KEY, _MOSAIC_KEY, _SAMPLE_ID_KEY
+from harpy.metadata._coordinate_systems import _coordinate_system_records, get_element_coordinate_system
+from harpy.metadata._registry import _COORDINATE_SYSTEMS_METADATA_KEY, _HARPY_METADATA_KEY
 from harpy.table.canonical_centers import CANONICAL_OBSM_KEY
 
 
@@ -167,7 +167,7 @@ def _assign_region(
     """Return the FOV of each ``(y, x)`` center of one mask, 0 outside every FOV; and its sample, mosaic and FOVs."""
     if labels_name not in sdata.labels:
         raise ValueError(f"Segmentation mask {labels_name!r} of the table is not a labels element of sdata.")
-    coordinate_system = _element_coordinate_system(sdata, labels_name)
+    coordinate_system = get_element_coordinate_system(sdata, labels_name)
     if coordinate_system is None:
         raise ValueError(
             f"Segmentation mask {labels_name!r} has no transformation to a coordinate system with Harpy metadata "

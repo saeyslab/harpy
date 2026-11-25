@@ -42,10 +42,18 @@ from harpy import qc  # noqa: E402
 from harpy import shape as sh  # noqa: E402
 from harpy import table as tb  # noqa: E402
 from harpy._spatial_bounds import SpatialBounds  # noqa: E402
+from harpy.metadata import (  # noqa: E402
+    get_coordinate_system_metadata,
+    get_element_coordinate_system,
+    validate_coordinate_system_metadata,
+)
 # isort: on
 
 __all__ = [
     "SpatialBounds",
+    "get_coordinate_system_metadata",
+    "get_element_coordinate_system",
+    "validate_coordinate_system_metadata",
     "utils",
     "externals",
     "io",

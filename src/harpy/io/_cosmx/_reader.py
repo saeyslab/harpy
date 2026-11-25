@@ -282,6 +282,19 @@ def cosmx(
     or expression aggregates. Instances meeting at FOV boundaries are not
     merged.
 
+    **Reading the metadata**
+
+    :func:`harpy.get_coordinate_system_metadata` returns the coordinate-system
+    records as a table, one row per mosaic.
+    :func:`harpy.get_element_coordinate_system` finds the mosaic's coordinate
+    system of any element, also of a segmentation made afterwards::
+
+        # Labels segmented on a crop of the morphology image of mosaic 1 of sample s1.
+        coordinate_system = hp.get_element_coordinate_system(sdata, "cellpose_labels")  # "s1_global_1"
+        hp.get_coordinate_system_metadata(sdata).loc[coordinate_system, ["sample_id", "mosaic"]]
+        # sample_id    s1
+        # mosaic        1
+
     **Assigning cells to FOVs**
 
     :func:`harpy.io.assign_cosmx_fovs` adds the sample ID, mosaic number and FOV
