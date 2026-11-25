@@ -40,9 +40,11 @@ _TIFF_SUFFIXES = (".tif", ".tiff")
 _MORPHOLOGY_GEOMETRY_INVARIANT_KEYS = ("NFov", "ImPixelSize_nm", "ImRows", "ImCols")
 _MORPHOLOGY_IMAGE_INVARIANT_KEYS = ("ChannelOrder",)
 _INSTANCE_ID_FORMULA = "global_id = (fov - 1) * base + local_id"
-# CosMx-only key of a coordinate-system record that is read outside the record builder, by the validator
-# and assign_cosmx_fovs. The keys that other subpackages read, such as sample_id, are in
-# harpy.metadata._registry.
+# Keys of a coordinate-system record that are read outside the record builder, by the validator and
+# assign_cosmx_fovs. Only the reader reads its record's fields: harpy.metadata returns them as they are.
+_SAMPLE_ID_KEY = "sample_id"
+_MOSAIC_KEY = "mosaic"
+_MICRONS_PER_UNIT_KEY = "microns_per_unit"
 _FOV_BOUNDS_KEY = "fov_bounds"
 # The fields of each FOV's half-open bounds in a coordinate-system record's fov_bounds.
 _FOV_BOUNDS_FIELDS = ("y0", "x0", "y1", "x1")
