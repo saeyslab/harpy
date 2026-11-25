@@ -31,8 +31,17 @@ relative paths without line numbers, as the code moves while it changes.
 - [x] Two public functions, at the top level: `hp.get_coordinate_system_metadata` and
       `hp.get_element_coordinate_system`, as SpatialData has `sd.get_element_annotators`. They live
       in a new package `src/harpy/metadata/`, which replaces `src/harpy/_metadata.py` as the single
-      home of Harpy's metadata code. No public key constants: the documented columns of the DataFrame
-      are the contract, and the functions supersede #292.
+      home of Harpy's metadata code. No public key constants: the DataFrame holds the fields as their
+      writer documents them, such as `hp.io.cosmx`, and the functions supersede #292.
+- [x] `hp.get_coordinate_system_metadata` returns exactly what the records hold: one column per field,
+      with no column added for a field a writer lacks and no dtype imposed. `harpy.metadata` knows no
+      field of a record; only its writer does.
+- [x] A third public function, `hp.validate_coordinate_system_metadata(sdata)`, makes the rules of the
+      registry explicit, whoever writes it: records are mappings; each names a coordinate system of
+      `sdata`; and no image, labels, points or shapes element, read or derived, has transformations to
+      two or more coordinate systems with a record. `validate_cosmx_store` calls it, then checks the
+      fields that `hp.io.cosmx` writes. A store in which a derived element lies in two mosaics'
+      coordinate systems is therefore no longer a valid CosMx store.
 - [x] The expression class is not recorded in the feature panel; the former section 5 of #293 is
       dropped. It stays a choice of the analysis, made when calling `hp.tb.aggregate_points`, as the
       docstrings of `hp.io.cosmx`, `hp.pt.add_feature_panel` and `aggregate_points` document now.
@@ -154,10 +163,10 @@ Records:
 - [x] Reduce element records to their own fields: images `channels`; labels `instance_id_encoding` or
       `categories`; points `feature_panel`. Without a feature panel, the reader writes no points record.
 - [x] Rename `_FOV_BOUNDS_KEY` to `"fov_bounds"`.
-- [x] The keys of the record that code outside the reader reads, `_SAMPLE_ID_KEY`, `_MOSAIC_KEY` and
-      `_MICRONS_PER_UNIT_KEY`, are private constants in `harpy/metadata/_registry.py`, as `hp.qc` and
-      `harpy.metadata` cannot import from `harpy.io`. The CosMx-only keys, such as `_FOV_BOUNDS_KEY`,
-      stay in `io/_cosmx/_constants.py`.
+- [x] The keys of the record that are read outside its builder, `_SAMPLE_ID_KEY`, `_MOSAIC_KEY`,
+      `_MICRONS_PER_UNIT_KEY` and `_FOV_BOUNDS_KEY`, are private constants in
+      `io/_cosmx/_constants.py`. Only the reader reads them; for a while the first three were in
+      `harpy/metadata/_registry.py`, while `hp.qc` and `get_coordinate_system_metadata` read them.
 
 Writing:
 
@@ -276,33 +285,45 @@ Package: `src/harpy/metadata/`, the single home of Harpy's metadata code.
       [`src/harpy/metadata/_registry.py`](../../src/harpy/metadata/_registry.py), remove
       `_metadata.py`, and update its importers.
 - [x] [`src/harpy/metadata/_coordinate_systems.py`](../../src/harpy/metadata/_coordinate_systems.py):
-      `_element_coordinate_system`, a private resolver from an element to its
-      coordinate system with a Harpy record, used by sections 1 and 3: the one it has a transformation
-      to; `None` if none; an error naming them if several. A table, which has no transformations, or
-      a name that is not an element of `sdata`, raises.
-- [ ] `hp.get_element_coordinate_system(sdata, element_name) -> str | None`, on that resolver.
-- [ ] `hp.get_coordinate_system_metadata(sdata) -> pandas.DataFrame`: one row per coordinate system
-      with a Harpy record, indexed by its name, with the columns `sample_id`, `mosaic` and
-      `microns_per_unit`, then the other fields of the record. Nested fields (`fovs`, `fov_bounds`,
-      `orientation`, `mosaic_grouping`) are object columns, not flattened. A store without the registry
-      gives an empty DataFrame with the documented columns. The docstring documents the columns as the
-      contract, and the CosMx fields as written by `hp.io.cosmx`.
-- [ ] The package imports nothing from Harpy's other subpackages, only `spatialdata` and `pandas`, so
+      a resolver from an element to its coordinate system with a Harpy record, used by sections 1
+      and 3: the one it has a transformation to; `None` if none; an error naming them if several. A
+      table, which has no transformations, or a name that is not an element of `sdata`, raises.
+- [x] `hp.get_element_coordinate_system(sdata, element_name) -> str | None` is that resolver. A private
+      twin, `_element_coordinate_system`, was merged into it: Harpy's own code, such as
+      `assign_cosmx_fovs`, calls the public function, which holds the one docstring.
+- [x] `hp.get_coordinate_system_metadata(sdata) -> pandas.DataFrame`: one row per coordinate system
+      with a Harpy record, indexed by its name, with one column per field of the records, in the order
+      the fields first occur. Nested fields (`fovs`, `fov_bounds`, `orientation`, `mosaic_grouping`)
+      are object columns, not flattened. A store without the registry gives an empty DataFrame. The
+      docstring refers to the writer for the fields, such as `hp.io.cosmx`.
+- [x] The index is named `coordinate_system`. A field that a record lacks is missing; dtypes are
+      pandas' own. Nested values are copies, so changing them does not change `sdata.attrs`.
+- [x] The package imports nothing from Harpy's other subpackages, only `spatialdata` and `pandas`, so
       that `harpy/__init__.py` can import it before them without circular imports.
-- [ ] Export both functions from `harpy/__init__.py`, in `__all__`, and add them to the API
-      documentation.
-- [ ] Public docstrings say "coordinate systems with Harpy metadata", not "registered", which reads
+- [x] Export both functions from `harpy/__init__.py`, in `__all__`, and add them to the API
+      documentation: a "Metadata" section in `docs/api.md`.
+- [x] Point to them from the docstring of `hp.io.cosmx` and from `docs/development/metadata.md`.
+- [x] Public docstrings say "coordinate systems with Harpy metadata", not "registered", which reads
       as image registration.
+- [x] `hp.validate_coordinate_system_metadata(sdata)`: the rules of the registry, in
+      `harpy/metadata/_coordinate_systems.py`, exported at the top level and in the "Metadata" section
+      of `docs/api.md`, and described in `docs/development/metadata.md`. `validate_cosmx_store` calls it
+      first; the check that each record names a coordinate system of `sdata` moved there from the
+      CosMx validator.
 - [ ] Close #292: the functions supersede its constants.
 
 Acceptance:
 
-- [ ] Downstream code finds a table's mosaic, the mosaic's morphology image and its `microns_per_unit`
+- [x] Downstream code finds a table's mosaic, the mosaic's morphology image and its `microns_per_unit`
       with `hp.get_element_coordinate_system` and `hp.get_coordinate_system_metadata`, without private
       imports, naming conventions or transformation searches of its own.
 - [x] No module imports `harpy._metadata`.
-- [ ] The functions are documented and tested, including an element in no and in two coordinate
+- [x] The functions are documented and tested, including an element in no and in two coordinate
       systems with Harpy metadata.
+- [x] `hp.validate_coordinate_system_metadata` accepts valid metadata and a store without it, and
+      rejects an element in two coordinate systems with a record, a record of a missing coordinate
+      system, and a record that is not a mapping. `validate_cosmx_store` rejects a derived element in
+      two mosaics' coordinate systems.
 
 ## Implementation order
 
@@ -314,18 +335,18 @@ Within the one PR, in this order, running the focused tests of each step:
        removal of the micron coordinate systems, and the lookup of `assign_cosmx_fovs` through the
        registry (section 3's first three tasks).
 3. [x] The rest of section 3: the mosaic column of `assign_cosmx_fovs`, and #276.
-4. [ ] Section 4's public functions, the API documentation, and the handover.
+4. [x] Section 4's public functions, the API documentation, and the handover.
 5. [ ] A broader test run at the end, as the move touches about ten modules; ask before running the
        full suite.
 
 ## Tests
 
-- [ ] `src/harpy/_tests/test_metadata/`: the tests of the new package.
+- [x] `src/harpy/_tests/test_metadata/`: the tests of the new package.
 - [x] `src/harpy/_tests/test_io/test_cosmx/`: the modules that assert on the record layout, the
       micron coordinate systems or `fov_bounds_px`.
 - [x] `src/harpy/_tests/test_qc/test_points/test_summarize_points.py` and
       `test_summarize_points_by_feature.py`: the sample from the registry.
-- [ ] Each acceptance criterion above has a test.
+- [x] Each acceptance criterion above has a test.
 
 ## Handover to downstream code
 
@@ -343,7 +364,7 @@ When all of the above is done, downstream code replaces its workarounds:
 | Point summaries in µm                                           | pass the record's `microns_per_unit` to `hp.qc.summarize_points`                                                                                                                                                  |
 | Sample of a points summary, `summary.metadata.sample_id`        | the sample of its points element: its row of `hp.get_coordinate_system_metadata` at `hp.get_element_coordinate_system(sdata, summary.metadata.points_name)`; or `obs[sample_key]` after `hp.io.assign_cosmx_fovs` |
 | Regrouping element records into mosaics                         | `hp.get_coordinate_system_metadata`                                                                                                                                                                               |
-| Private constants and literals                                  | the two functions; the columns of the DataFrame are the contract                                                                                                                                                  |
+| Private constants and literals                                  | the two functions; the DataFrame's columns are the fields of the records, as `hp.io.cosmx` documents them                                                                                                         |
 | `"Endogenous"` as a constant                                    | unchanged: it stays in the downstream configuration, passed as `expression_class=` to `hp.tb.aggregate_points`                                                                                                    |
 
 Stores written before this change must be written again with the reader.
@@ -417,3 +438,24 @@ Stores written before this change must be written again with the reader.
   `assign_cosmx_fovs` and `hp.io.cosmx` describe the columns. Tests: the dtypes and categories, the
   mosaic of each row over two mosaics and on a crop, a row outside every FOV, the new key checks, and
   a Zarr round trip of the columns. The FOV tests pass (13).
+- 2026-11-24: docstrings of `assign_cosmx_fovs` and its error messages say "Harpy metadata" rather
+  than "record"; the validator's messages keep "record". Step 4 done: `hp.get_coordinate_system_metadata`
+  and `hp.get_element_coordinate_system` in `harpy/metadata/_coordinate_systems.py`, exported at the top
+  level, in a "Metadata" section of `docs/api.md`, and pointed to from the docstring of `hp.io.cosmx`
+  and `docs/development/metadata.md`. Decided: index `coordinate_system`; stable dtypes of the first
+  three columns; copies of nested values. Tests: both functions in `test_metadata/`, and both on a store
+  written by the reader. Focused tests pass (430). The docs were not built. Left: step 5, and closing
+  #276 and #292 with the PR.
+- 2026-11-24: the `hp.io.cosmx` docstring gets a "Reading the metadata" section, and the docstring of
+  `get_coordinate_system_metadata` refers to the writer instead of repeating its fields. Decided:
+  `get_coordinate_system_metadata` returns exactly what the records hold, without leading columns or
+  imposed dtypes, as `mosaic` is a CosMx notion. With that, `_SAMPLE_ID_KEY`, `_MOSAIC_KEY` and
+  `_MICRONS_PER_UNIT_KEY` moved back to `io/_cosmx/_constants.py`, and `docs/development/metadata.md`
+  says the fields depend on the writer. Tests of `test_metadata/` and `test_io/test_cosmx/` pass (204).
+- 2026-11-25: merged the private `_element_coordinate_system` into `hp.get_element_coordinate_system`,
+  whose docstring gains the diagram of a derived element; `assign_cosmx_fovs` calls the public function,
+  and the duplicated tests merged. Tests of `test_metadata/` and `test_io/test_cosmx/` pass (200).
+- 2026-11-25: decided a public `hp.validate_coordinate_system_metadata`, so that the rules of the
+  registry are enforced rather than implicit; `validate_cosmx_store` calls it. The check that each
+  record is a mapping moved into `_coordinate_system_records`, shared by the three functions. Focused
+  tests pass (432).
