@@ -15,11 +15,6 @@ _LABELS_METADATA_KEY = "labels"
 _POINTS_METADATA_KEY = "points"
 _FEATURE_PANELS_METADATA_KEY = "feature_panels"
 _COORDINATE_SYSTEMS_METADATA_KEY = "coordinate_systems"
-# Keys of a coordinate-system record that code outside its writer reads. A reader adds fields of its
-# own, such as the FOVs of a CosMx mosaic.
-_SAMPLE_ID_KEY = "sample_id"
-_MOSAIC_KEY = "mosaic"
-_MICRONS_PER_UNIT_KEY = "microns_per_unit"
 _METADATA_REGISTRIES = (
     _IMAGES_METADATA_KEY,
     _LABELS_METADATA_KEY,
