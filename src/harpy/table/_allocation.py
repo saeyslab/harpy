@@ -866,7 +866,7 @@ def bin_counts(
         instance_key=cell_index_name,
     )
 
-    coordinates = combined_partitions.groupby(cell_index_name)[name_x, name_y].mean()
+    coordinates = combined_partitions.groupby(cell_index_name)[[name_x, name_y]].mean()
 
     cell_counts = combined_partitions.groupby([name_barcode_id, cell_index_name]).size()
 
