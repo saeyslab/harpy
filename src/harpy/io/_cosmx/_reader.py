@@ -271,6 +271,14 @@ def cosmx(
     during writing. Without a feature panel, this cross-validation is skipped
     and the transcript-provided targets and classes are retained.
 
+    AtoMx measures transcript coordinates from pixel corners, from 0 up to and
+    including the FOV's width and height, while Harpy centers each pixel on its
+    integer coordinates, as when it counts transcripts in cells. The reader
+    converts the coordinates, so that each transcript lies on the pixel on which
+    AtoMx assigns it to a cell; a transcript on a FOV's far edge lies on the
+    FOV's last pixel. A coordinate beyond the FOV's width or height, or below
+    0, raises.
+
     FOV selection is permissive for known FOVs. For each sample, the reader
     intersects requested and positioned FOVs with availability across all
     enabled modalities. Known requested FOVs that do not satisfy that

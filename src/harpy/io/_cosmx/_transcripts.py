@@ -43,6 +43,10 @@ _SOURCE_DTYPES = {
     "x": "float64",
     "y": "float64",
 }
+# Breaks the tie of whole-number AtoMx coordinates, which lie on a pixel boundary, towards the pixel AtoMx
+# assigns them to. AtoMx writes 2 decimals; 1e-6 pixel is far below that, and far above the spacing of
+# float64 at mosaic coordinates.
+_TIE_EPSILON = 1e-6
 
 
 def _add_transcript_points(
@@ -60,8 +64,9 @@ def _add_transcript_points(
     """Add one backed, out-of-core transcript points element per mosaic.
 
     Only transcript CSVs selected by ``preview`` are read. Each FOV's local
-    coordinates are oriented exactly like its raster tile and translated into
-    its mosaic-local canvas. The resulting Dask DataFrames remain lazy until
+    coordinates are converted from AtoMx's pixel corners to Harpy's pixel
+    centers, oriented exactly like its raster tile, and translated into its
+    mosaic-local canvas. The resulting Dask DataFrames remain lazy until
     SpatialData writes them as partitioned Parquet inside the backing store.
 
     The vendor ``CellId`` and CSV ``fov`` columns are deliberately excluded at
@@ -359,14 +364,19 @@ def _normalize_transcript_partition(
             )
 
     tile_height, tile_width = tile_shape
-    if not ((0 <= source_x) & (source_x < tile_width)).all() or not ((0 <= source_y) & (source_y < tile_height)).all():
+    # AtoMx measures coordinates from pixel corners, in the closed ranges [0, width] and [0, height].
+    outside = ~((0 <= source_x) & (source_x <= tile_width) & (0 <= source_y) & (source_y <= tile_height))
+    if outside.any():
+        first = int(np.flatnonzero(outside)[0])
         raise ValueError(
             f"CosMx transcript CSV {path} contains coordinates outside FOV bounds "
-            f"0 <= x < {tile_width} and 0 <= y < {tile_height}."
+            f"0 <= x <= {tile_width} and 0 <= y <= {tile_height}, such as "
+            f"(x, y) = ({source_x[first]}, {source_y[first]}). Check that the CSV holds this FOV's local pixel "
+            "coordinates."
         )
     origin_y, origin_x = tile_origin
-    x = tile_width - 1 - source_x if flip_x else source_x
-    y = tile_height - 1 - source_y if flip_y else source_y
+    x = _to_pixel_centers(source_x, tile_width, flip=flip_x)
+    y = _to_pixel_centers(source_y, tile_height, flip=flip_y)
 
     result = frame.drop(columns=["x", "y"]).rename(columns=_SOURCE_TO_OUTPUT)
     result["gene"] = result["gene"].astype(pd.CategoricalDtype(categories=gene_categories))
@@ -376,3 +386,15 @@ def _normalize_transcript_partition(
     result["y"] = y + origin_y
     extras = [column for column in result.columns if column not in _OUTPUT_COLUMNS]
     return result[[*_OUTPUT_COLUMNS, *extras]]
+
+
+def _to_pixel_centers(source: np.ndarray, size: int, *, flip: bool) -> np.ndarray:
+    """Convert AtoMx FOV-local coordinates along one axis from pixel corners to Harpy's pixel centers.
+
+    AtoMx measures from pixel corners: pixel ``j`` spans ``[j, j + 1)``, and it assigns a coordinate of
+    exactly ``size`` to the last pixel. Harpy centers pixel ``j`` on ``j``, so the result rounds, with
+    :func:`numpy.rint`, to the pixel AtoMx assigns the point to. With ``flip``, pixel ``j`` becomes
+    ``size - 1 - j``, as the FOV's raster tile is flipped by index.
+    """
+    centers = np.where(source == size, size - 1, source - 0.5 + _TIE_EPSILON)
+    return size - 1 - centers if flip else centers

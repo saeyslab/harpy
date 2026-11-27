@@ -7,12 +7,22 @@ import dask.dataframe as dd
 import numpy as np
 import pandas as pd
 import pytest
+import tifffile
 from spatialdata import SpatialData, read_zarr
 from spatialdata.models import PointsModel
 from spatialdata.transformations import Identity, get_transformation
 
-from harpy.io._cosmx import _add_transcript_points, _discover_cosmx, _preview_cosmx, _transcripts
+from harpy.io._cosmx import (
+    _add_instance_labels,
+    _add_transcript_points,
+    _discover_cosmx,
+    _preview_cosmx,
+    _transcripts,
+)
+from harpy.io._cosmx._labels import _remap_instance_ids
 from harpy.points import add_feature_panel
+from harpy.table._allocation import _assign_points_to_labels
+from harpy.transformations._transformations import _resolve_point_to_labels_transform
 
 
 def test_add_transcript_points_splits_mosaics_and_roundtrips(
@@ -64,14 +74,15 @@ def test_add_transcript_points_splits_mosaics_and_roundtrips(
     assert "CellId" not in points_1.columns
     assert "fov" not in points_1.columns
 
+    # AtoMx pixel corners become pixel centers, x - 0.5, and x is flipped, as 8 - 1 - (x - 0.5).
     values_1 = points_1.compute().reset_index(drop=True)
-    np.testing.assert_allclose(sorted(values_1["x"]), [3.5, 6.0, 15.0])
-    np.testing.assert_allclose(sorted(values_1["y"]), [1.0, 2.0, 4.5])
+    np.testing.assert_allclose(sorted(values_1["x"]), [4.0, 6.5, 15.5], atol=1e-5)
+    np.testing.assert_allclose(sorted(values_1["y"]), [0.5, 1.5, 4.0], atol=1e-5)
     assert values_1["source_compartment"].isna().sum() == 1
     assert sorted(values_1["quality"]) == [0.5, 0.5, 1.5]
 
     values_2 = points_2.compute()
-    np.testing.assert_allclose(values_2[["x", "y"]], [[0.0, 6.0]])
+    np.testing.assert_allclose(values_2[["x", "y"]], [[0.5, 5.5]], atol=1e-5)
     _assert_transformations(sdata, "transcripts_mosaic_1", mosaic=1)
     _assert_transformations(sdata, "transcripts_mosaic_2", mosaic=2)
 
@@ -145,22 +156,23 @@ def test_transcript_coordinates_follow_raster_orientation(
         path=Path("transcripts.csv"),
     )
 
-    assert (result.loc[0, "x"], result.loc[0, "y"]) == expected
+    # The pixel on which the transcript lies, as labels lookups round to it.
+    assert (np.rint(result.loc[0, "x"]), np.rint(result.loc[0, "y"])) == expected
 
 
 @pytest.mark.parametrize(
     ("x", "y"),
     [
         (-0.01, 1.0),
-        (6.0, 1.0),
+        (6.01, 1.0),
         (1.0, -0.01),
-        (1.0, 8.0),
+        (1.0, 8.01),
     ],
 )
 def test_transcript_coordinates_must_be_inside_fov_bounds(x: float, y: float) -> None:
     frame = _transcript_partition(x=x, y=y)
 
-    with pytest.raises(ValueError, match=r"outside FOV bounds 0 <= x < 6 and 0 <= y < 8"):
+    with pytest.raises(ValueError, match=r"outside FOV bounds 0 <= x <= 6 and 0 <= y <= 8, such as \(x, y\) = "):
         _transcripts._normalize_transcript_partition(
             frame,
             tile_origin=(20, 12),
@@ -170,6 +182,97 @@ def test_transcript_coordinates_must_be_inside_fov_bounds(x: float, y: float) ->
             flip_y=False,
             path=Path("transcripts.csv"),
         )
+
+
+@pytest.mark.parametrize("flip_y", [False, True])
+@pytest.mark.parametrize("flip_x", [False, True])
+@pytest.mark.parametrize(
+    ("x", "y"),
+    [
+        # Whole numbers lie on a pixel boundary.
+        (0.0, 0.0),
+        (2.0, 3.0),
+        (5.0, 7.0),
+        # Halves, and the last values before a boundary.
+        (2.5, 3.5),
+        (2.99, 7.99),
+        # AtoMx writes points on a FOV's far edge, x == width or y == height.
+        (6.0, 1.25),
+        (1.25, 8.0),
+        (6.0, 8.0),
+    ],
+)
+def test_transcript_coordinates_round_to_the_atomx_pixel(x: float, y: float, flip_x: bool, flip_y: bool) -> None:
+    frame = _transcript_partition(x=x, y=y)
+
+    # An odd and a large origin: the conversion must survive the float64 spacing at mosaic coordinates.
+    result = _transcripts._normalize_transcript_partition(
+        frame,
+        tile_origin=(100_001, 13),
+        tile_shape=(8, 6),
+        gene_categories=("GeneA",),
+        flip_x=flip_x,
+        flip_y=flip_y,
+        path=Path("transcripts.csv"),
+    )
+
+    assert np.rint(result.loc[0, "x"]) == 13 + _atomx_pixel(x, 6, flip=flip_x)
+    assert np.rint(result.loc[0, "y"]) == 100_001 + _atomx_pixel(y, 8, flip=flip_y)
+
+
+@pytest.mark.parametrize("flip_y", [False, True])
+@pytest.mark.parametrize("flip_x", [False, True])
+def test_transcripts_are_counted_in_the_cell_atomx_assigns_them_to(
+    decoded_cosmx_path: Path,
+    tmp_path: Path,
+    flip_x: bool,
+    flip_y: bool,
+) -> None:
+    # One cell per pixel, so that a transcript a pixel off lands in another cell.
+    source_labels = np.arange(1, 8 * 8 + 1, dtype=np.uint16).reshape(8, 8)
+    for fov in (1, 2):
+        tifffile.imwrite(
+            decoded_cosmx_path / "CellStatsDir" / f"FOV{fov:05d}" / f"CellLabels_F{fov:05d}.tif",
+            source_labels,
+            metadata=None,
+        )
+    preview = _preview_cosmx(_discover_cosmx(decoded_cosmx_path), fovs=(1, 2))
+    # Whole numbers, halves, the origin and the far edges, in FOVs 1 and 2, adjacent 8 x 8 tiles of one mosaic.
+    x = (0.0, 3.0, 2.5, 4.99, 8.0, 1.5, 8.0, 7.99)
+    y = (0.0, 5.0, 6.5, 1.99, 3.25, 8.0, 8.0, 0.01)
+    for fov in (1, 2):
+        _write_transcript_csv(
+            preview.manifest.fovs_by_id[fov].transcripts,
+            genes=("GeneA",) * len(x),
+            x=x,
+            y=y,
+            first_transcript_id=100 * fov,
+        )
+    sdata = _backed_sdata(tmp_path)
+
+    _add_instance_labels(sdata, preview, sample_id="sample", chunks=(4, 4), flip_x=flip_x, flip_y=flip_y)
+    _add_transcript_points(sdata, preview, sample_id="sample", blocksize=64, flip_x=flip_x, flip_y=flip_y)
+
+    labels = sdata.labels["instance_labels_mosaic_1"]
+    points = sdata.points["transcripts_mosaic_1"]
+    assigned = _assign_points_to_labels(
+        labels,
+        points,
+        _resolve_point_to_labels_transform(points, labels, to_coordinate_system="global_1"),
+        value_key="transcript_id",
+        instance_key="cell_ID",
+    ).compute()
+    # AtoMx assigns a transcript to the cell at its floor pixel, or the last pixel on the far edge.
+    expected = {
+        100 * fov + index: int(
+            _remap_instance_ids(source_labels, fov=fov)[
+                _atomx_pixel(y_, 8, flip=False), _atomx_pixel(x_, 8, flip=False)
+            ]
+        )
+        for fov in (1, 2)
+        for index, (x_, y_) in enumerate(zip(x, y, strict=True))
+    }
+    assert dict(zip(assigned["transcript_id"], assigned["cell_ID"].astype(int), strict=True)) == expected
 
 
 def test_transcript_preflight_rejects_missing_retained_column_without_writing(
@@ -364,11 +467,12 @@ def _write_transcript_csv(
     cell_comp: tuple[str | None, ...] | None = None,
     invalid_ignored_fields: bool = False,
     include_ignored_fields: bool = True,
+    first_transcript_id: int = 1,
 ) -> None:
     assert path is not None
     count = len(genes)
     values: dict[str, object] = {
-        "V1": np.arange(1, count + 1),
+        "V1": np.arange(first_transcript_id, first_transcript_id + count),
         "CellComp": cell_comp if cell_comp is not None else ("Nuclear",) * count,
         "codeclass": code_classes if code_classes is not None else ("Endogenous",) * count,
         "target": genes,
@@ -382,6 +486,12 @@ def _write_transcript_csv(
         values["CellId"] = ignored
         values["fov"] = ignored
     pd.DataFrame(values).to_csv(path, index=False)
+
+
+def _atomx_pixel(source: float, size: int, *, flip: bool) -> int:
+    """Return the pixel AtoMx assigns a FOV-local coordinate to, flipped by index like the raster tile."""
+    pixel = size - 1 if source == size else int(np.floor(source))
+    return size - 1 - pixel if flip else pixel
 
 
 def _transcript_partition(*, x: float, y: float) -> pd.DataFrame:
