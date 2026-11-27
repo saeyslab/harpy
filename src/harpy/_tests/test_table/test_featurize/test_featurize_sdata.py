@@ -1,11 +1,13 @@
 from pathlib import Path
 
+import anndata as ad
 import dask
 import dask.array as da
 import numpy as np
+import pandas as pd
 import pytest
 from spatialdata import SpatialData, read_zarr
-from spatialdata.models import TableModel
+from spatialdata.models import Image2DModel, Labels2DModel, TableModel
 
 from harpy.image import add_image, add_labels
 from harpy.table.featurization._featurize import extract_instances, featurize
@@ -215,3 +217,71 @@ def test_featurize_sdata_blobs(sdata: SpatialData, tmp_path: Path, store_interme
 
     assert embedding_obsm_key in sdata[output_table_name].obsm
     assert sdata[output_table_name].obsm[embedding_obsm_key].shape == (sdata[table_name].shape[0], embedding_dim)
+
+
+def _mean_intensity_model(batch: np.ndarray, embedding_dimension: int = 1) -> np.ndarray:
+    means = batch.mean(axis=(1, 2, 3, 4), keepdims=False)[:, None].astype(np.float32)
+    return np.repeat(means, embedding_dimension, axis=1)
+
+
+@pytest.mark.parametrize(
+    ("obs_rows", "labels_order", "image_order"),
+    [
+        # labels_name passed in reverse order relative to adata.obs
+        ([("lbl0", 1), ("lbl1", 1)], ["lbl1", "lbl0"], ["img1", "img0"]),
+        # regions interleaved in adata.obs
+        ([("lbl0", 1), ("lbl1", 1), ("lbl0", 2)], ["lbl0", "lbl1"], ["img0", "img1"]),
+    ],
+)
+def test_featurize_multi_region_aligns_embeddings_by_region_and_instance(obs_rows, labels_order, image_order):
+    img0 = np.full((1, 16, 16), 10.0, dtype=np.float32)
+    img1 = np.full((1, 16, 16), 99.0, dtype=np.float32)
+
+    lbl0 = np.zeros((16, 16), dtype=np.uint16)
+    lbl0[2:5, 2:5] = 1
+    lbl0[10:13, 10:13] = 2
+
+    lbl1 = np.zeros((16, 16), dtype=np.uint16)
+    lbl1[4:7, 4:7] = 1
+
+    obs = pd.DataFrame(
+        {
+            _REGION_KEY: pd.Categorical([r for r, _ in obs_rows]),
+            _INSTANCE_KEY: [i for _, i in obs_rows],
+        },
+        index=[f"{r}_{i}" for r, i in obs_rows],
+    )
+    adata = ad.AnnData(X=np.zeros((len(obs_rows), 1), dtype=np.float32), obs=obs)
+    adata = TableModel.parse(adata, region=["lbl0", "lbl1"], region_key=_REGION_KEY, instance_key=_INSTANCE_KEY)
+
+    sdata = SpatialData(
+        images={
+            "img0": Image2DModel.parse(da.from_array(img0, chunks=(1, 16, 16)), dims=("c", "y", "x")),
+            "img1": Image2DModel.parse(da.from_array(img1, chunks=(1, 16, 16)), dims=("c", "y", "x")),
+        },
+        labels={
+            "lbl0": Labels2DModel.parse(da.from_array(lbl0, chunks=(16, 16)), dims=("y", "x")),
+            "lbl1": Labels2DModel.parse(da.from_array(lbl1, chunks=(16, 16)), dims=("y", "x")),
+        },
+        tables={"tbl": adata},
+    )
+
+    sdata = featurize(
+        sdata,
+        image_name=image_order,
+        labels_name=labels_order,
+        table_name="tbl",
+        output_table_name="tbl_out",
+        depth=4,
+        diameter=5,
+        embedding_dimension=1,
+        model=_mean_intensity_model,
+        to_coordinate_system=["global", "global"],
+        embedding_obsm_key="emb",
+        overwrite=True,
+    )
+
+    out_table = sdata.tables["tbl_out"]
+    emb = out_table.obsm["emb"][:, 0]
+    expected = np.array([10.0 * (9 / 25) if r == "lbl0" else 99.0 * (9 / 25) for r in out_table.obs[_REGION_KEY]])
+    np.testing.assert_allclose(emb, expected, rtol=1e-5)

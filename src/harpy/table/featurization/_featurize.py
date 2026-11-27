@@ -514,16 +514,17 @@ def featurize(
         region_key = process_table_instance.region_key
         adata = process_table_instance._get_adata()
 
-    for i, (_labels_name, instances_ids, features) in enumerate(
-        zip(labels_name, instances_ids_list, features_list, strict=True)
-    ):
-        # get the instance_ids in adata, and sort features and instances_ids matrix in the same way.
-        instances_ids_adata = adata[adata.obs[region_key] == _labels_name].obs[instance_key].values
+    embedding_dtype = np.result_type(*(features.dtype for features in features_list))
+    embedding = np.empty((adata.n_obs, features_list[0].shape[1]), dtype=embedding_dtype)
+    for _labels_name, instances_ids, features in zip(labels_name, instances_ids_list, features_list, strict=True):
+        # Align each region's features onto its exact rows in adata by (region_key, instance_key).
+        region_mask = (adata.obs[region_key] == _labels_name).to_numpy()
+        instances_ids_adata = adata.obs[instance_key].to_numpy()[region_mask]
         _, features = _sort_features(
             instances_ids_adata=instances_ids_adata, instances_ids=instances_ids, features=features
         )
-        features_list[i] = features
-    adata.obsm[embedding_obsm_key] = np.concatenate(features_list, axis=0)
+        embedding[region_mask] = features
+    adata.obsm[embedding_obsm_key] = embedding
 
     sdata = add_table(
         sdata,
